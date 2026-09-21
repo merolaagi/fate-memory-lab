@@ -44,6 +44,8 @@ class RunConfig(BaseModel):
     self_excitation: float = Field(DEFAULTS["self_excitation"], ge=0, le=20)
     coupling: float = Field(DEFAULTS["coupling"], ge=0, le=5)
     drift: list[float] = Field(default_factory=lambda: list(DEFAULTS["drift"]))
+    noise: list[float] = Field(default_factory=lambda: list(DEFAULTS["noise"]))
+    division: list[float] = Field(default_factory=lambda: list(DEFAULTS["division"]))
     seed: int = DEFAULTS["seed"]
     repeats: int = Field(DEFAULTS["repeats"], ge=1, le=10)
 
@@ -182,6 +184,8 @@ def create_run(cfg: RunConfig):
     if not c["tasks"] or not c["arms"]:
         raise HTTPException(400, "Pick at least one task and one arm")
     c["drift"] = [float(e) for e in c["drift"] if 0 <= float(e) <= 3][:6]
+    c["noise"] = [float(e) for e in c["noise"] if 0 <= float(e) <= 1][:6]
+    c["division"] = [float(e) for e in c["division"] if 0 <= float(e) <= 3][:6]
     rid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
     run = {"id": rid, "name": c.pop("name") or rid, "created": time.time(), "config": c,
            "status": "queued", "results": [], "version": __version__}
@@ -251,15 +255,18 @@ def export_csv(rid: str):
     run = load(rid)
     buf = io.StringIO()
     w = csv.writer(buf)
-    drift_eps = run["config"]["drift"]
+    c = run["config"]
+    drift_eps, noise_eps, div_eps = c["drift"], c.get("noise", []), c.get("division", [])
     w.writerow(["task", "arm", "rep", "seed", "params", "acc_train_len", "acc_test_len", "settled",
                 "attractors", "settle_steps", "negative_edges", "seconds"]
-               + [f"drift_{e}_acc" for e in drift_eps] + [f"drift_{e}_settled" for e in drift_eps])
+               + [f"drift_{e}_acc" for e in drift_eps] + [f"drift_{e}_settled" for e in drift_eps]
+               + [f"noise_{e}_acc" for e in noise_eps] + [f"division_{e}_acc" for e in div_eps])
     for r in sorted(run["results"], key=lambda r: (r["task"], r["arm"], r.get("rep", 0))):
         w.writerow([r["task"], r["arm"], r.get("rep", 0), r.get("seed", ""), r["params"], r["acc_train_len"],
                     r["acc_test_len"], r["settled"], r["attractors"], r.get("settle_steps", ""),
                     r["negative_edges"], r["seconds"]]
-                   + [d["acc"] for d in r["drift"]] + [d["settled"] for d in r["drift"]])
+                   + [d["acc"] for d in r["drift"]] + [d["settled"] for d in r["drift"]]
+                   + [d["acc"] for d in r.get("noise", [])] + [d["acc"] for d in r.get("division", [])])
     return Response(buf.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": f'attachment; filename="fate-memory-{rid}.csv"'})
 

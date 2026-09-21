@@ -7,7 +7,7 @@ from app.engine import DEFAULTS, TASKS, make_batch, run_job
 
 def tiny(**kw):
     cfg = dict(DEFAULTS)
-    cfg.update(hidden=6, iters=10, batch=4, train_len=20, test_len=30, drift=[0.1], repeats=1)
+    cfg.update(hidden=6, iters=10, batch=4, train_len=20, test_len=30, drift=[0.1], noise=[0.05], division=[0.2], repeats=1)
     cfg.update(kw)
     return cfg
 
@@ -26,6 +26,7 @@ def test_arms_match_params_and_signs():
         r = run_job("flipflop", arm, tiny())
         params.add(r["params"])
         assert len(r["wells"]) == 96
+        assert r["landscape"]["traj"] and len(r["noise"]) == 1 and len(r["division"]) == 1
         if arm == "coop":
             assert r["negative_edges"] == 0
         if arm == "contract":
@@ -40,7 +41,7 @@ def test_api_run_lifecycle(tmp_path, monkeypatch):
     importlib.reload(server)
     with TestClient(server.app) as client:
         assert client.get("/api/health").json()["ok"]
-        body = tiny(tasks=["xor"], arms=["coop", "contract"])
+        body = tiny(tasks=["xor", "dose", "background"], arms=["coop", "contract"])
         rid = client.post("/api/runs", json=body).json()["id"]
         for _ in range(240):
             run = client.get(f"/api/runs/{rid}").json()
@@ -48,6 +49,6 @@ def test_api_run_lifecycle(tmp_path, monkeypatch):
                 break
             time.sleep(0.5)
         assert run["status"] == "done", run.get("error")
-        assert len(run["results"]) == 2
+        assert len(run["results"]) == 6
         assert client.get(f"/api/runs/{rid}/export.csv").text.startswith("task,arm")
         assert client.delete(f"/api/runs/{rid}").status_code == 200

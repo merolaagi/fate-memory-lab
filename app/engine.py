@@ -11,6 +11,15 @@ Tasks:
   flipflop  3 channels, output = sign of last pulse on each channel
   xor       2 latched channels, output = product of the two latched signs
   parity    1 channel of identical pulses, output flips on every pulse
+  dose      flipflop, but each sequence's pulses are scaled by a random gain (0.3x to 3x)
+  background flipflop on top of a slowly wandering background level on every channel
+
+Cell-inspired stress tests on the trained circuit:
+  drift     sign-preserving multiplicative drift of weight magnitudes (enzyme levels vary)
+  noise     Langevin noise on the state during the test rollout (gene-expression noise)
+  division  every 40 steps the state is multiplied by random partition noise (cell division)
+
+Landscape: 2D principal-component map of settling trajectories (a Waddington landscape view).
 """
 import time
 import autograd.numpy as np
@@ -22,6 +31,8 @@ TASKS = {
     "flipflop": {"nin": 3, "nout": 3},
     "xor": {"nin": 2, "nout": 1},
     "parity": {"nin": 1, "nout": 1},
+    "dose": {"nin": 3, "nout": 3},
+    "background": {"nin": 3, "nout": 3},
 }
 DT = 0.5
 
@@ -39,6 +50,8 @@ DEFAULTS = {
     "self_excitation": 5.0,
     "coupling": 0.05,
     "drift": [0.1, 0.2, 0.3],
+    "noise": [0.02, 0.05, 0.1],
+    "division": [0.1, 0.25, 0.5],
     "seed": 0,
     "repeats": 3,
 }
@@ -104,6 +117,7 @@ def make_batch(task, B, T, p, seed):
             y[t] = state
         return u, y
     mask[0] = True
+    base = "flipflop" if task in ("dose", "background") else task
     u = onp.zeros((T, B, nin))
     u[mask] = r.choice([-1.0, 1.0], size=int(mask.sum()))
     latched = onp.zeros((T, B, nin))
@@ -111,7 +125,18 @@ def make_batch(task, B, T, p, seed):
     for t in range(T):
         last = onp.where(u[t] != 0, u[t], last)
         latched[t] = last
-    if task == "flipflop":
+    if task == "dose":
+        gain = onp.exp(r.uniform(onp.log(0.3), onp.log(3.0), size=(1, B, 1)))
+        return u * gain, latched
+    if task == "background":
+        steps = r.normal(0, 0.04, (T, B, nin))
+        bg = onp.zeros((T, B, nin))
+        level = r.uniform(-0.5, 0.5, (B, nin))
+        for t in range(T):
+            level = onp.clip(level + steps[t], -0.5, 0.5)
+            bg[t] = level
+        return u + bg, latched
+    if base == "flipflop":
         return u, latched
     return u, latched[:, :, :1] * latched[:, :, 1:2]
 
@@ -125,6 +150,50 @@ def rollout(P, W, u, K):
             h = h + DT * (-h + sig(h @ W.T + drive))
         outs.append(h @ P["R"].T + P["c"])
     return np.stack(outs)
+
+
+def rollout_perturbed(P, W, u, K, noise=0.0, division=0.0, seed=11, every=40):
+    r = onp.random.default_rng(seed)
+    h = 0.5 * onp.ones((u.shape[1], W.shape[0]))
+    outs = []
+    for t in range(u.shape[0]):
+        if division > 0 and t > 0 and t % every == 0:
+            h = onp.clip(h * onp.exp(division * r.normal(size=h.shape)), 0.0, 1.0)
+        drive = u[t] @ P["U"].T + P["b"]
+        for _ in range(K):
+            h = h + DT * (-h + 1.0 / (1.0 + onp.exp(-(h @ W.T + drive))))
+            if noise > 0:
+                h = onp.clip(h + noise * onp.sqrt(DT) * r.normal(size=h.shape), 0.0, 1.0)
+        outs.append(h @ P["R"].T + P["c"])
+    return onp.stack(outs)
+
+
+def perturbed_accuracy(task, P, W, cfg, noise=0.0, division=0.0, B=48, seed=17):
+    u, y = make_batch(task, B, cfg["test_len"], cfg["pulse_prob"], seed)
+    accs = []
+    for k in range(3):
+        out = rollout_perturbed(P, W, u, cfg["substeps"], noise, division, seed=seed + 101 * k)
+        accs.append(onp.mean(onp.sign(out[10:]) == y[10:]))
+    return float(onp.mean(accs))
+
+
+def landscape(P, W, runs=96, traj_runs=24, steps=600, every=20, seed=3, ids=None):
+    r = onp.random.default_rng(seed)
+    h = r.random((runs, W.shape[0]))
+    frames = [h.copy()]
+    for s in range(1, 2501):
+        h = h + DT * (-h + 1.0 / (1.0 + onp.exp(-(h @ W.T + P["b"]))))
+        if s <= steps and s % every == 0:
+            frames.append(h.copy())
+    ends = h
+    X = onp.concatenate(frames + [ends], axis=0)
+    mu = X.mean(axis=0)
+    _, sv, Vt = onp.linalg.svd(X - mu, full_matrices=False)
+    comps = Vt[:2]
+    var = (sv[:2] ** 2) / max(float((sv ** 2).sum()), 1e-12)
+    proj = lambda A: onp.round((A - mu) @ comps.T, 4)
+    traj = [proj(onp.stack([f[i] for f in frames])).tolist() for i in range(traj_runs)]
+    return {"traj": traj, "ends": proj(ends).tolist(), "ids": ids or [], "var": [round(float(v), 3) for v in var]}
 
 
 def settle_test(P, W, runs=96, steps=2500, tol=1e-6, seed=3):
@@ -212,6 +281,7 @@ def run_job(task, arm, cfg, progress=None, rep=0):
         "curve": curve,
     }
     result.update(settle_test(P, W))
+    result["landscape"] = landscape(P, W, ids=result["wells"])
     drift = []
     for eps in cfg["drift"]:
         fs, accs = [], []
@@ -222,5 +292,9 @@ def run_job(task, arm, cfg, progress=None, rep=0):
             accs.append(accuracy(task, P, Wd, cfg, cfg["test_len"], B=48))
         drift.append({"eps": eps, "settled": float(onp.mean(fs)), "acc": float(onp.mean(accs))})
     result["drift"] = drift
+    result["drift_base"] = accuracy(task, P, W, cfg, cfg["test_len"], B=48)
+    result["stress_base"] = perturbed_accuracy(task, P, W, cfg)
+    result["noise"] = [{"eps": e, "acc": perturbed_accuracy(task, P, W, cfg, noise=e)} for e in cfg.get("noise", [])]
+    result["division"] = [{"eps": e, "acc": perturbed_accuracy(task, P, W, cfg, division=e)} for e in cfg.get("division", [])]
     result["seconds"] = round(time.time() - t0, 1)
     return result

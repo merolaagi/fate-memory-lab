@@ -46,6 +46,8 @@ legend{font-weight:700;margin-bottom:6px}
 .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .actions a{color:var(--muted);font-size:.9rem}
 .sd{color:var(--muted);font-size:.8em}
+h3.sub{font-family:var(--display);font-weight:500;font-size:1.1rem;margin:28px 0 4px}
+.land svg{width:100%;height:auto;display:block;background:var(--surface);border:1px solid var(--rule);border-radius:14px}
 label.f{display:grid;gap:3px;font-size:.85rem;color:var(--muted)}
 label.f input{border:1px solid var(--rule);background:var(--agar);border-radius:6px;padding:6px 8px;font-size:.95rem;color:var(--ink);width:100%}
 details summary{cursor:pointer;color:var(--muted);font-size:.9rem}
@@ -122,6 +124,8 @@ figure{margin:0}
         <label class="f">Self-excitation<input name="self_excitation" type="number" step="0.5" min="0"></label>
         <label class="f">Coupling<input name="coupling" type="number" step="0.01" min="0"></label>
         <label class="f">Drift levels<input name="drift" placeholder="0.1, 0.2, 0.3"></label>
+        <label class="f">Noise levels<input name="noise" placeholder="0.02, 0.05, 0.1"></label>
+        <label class="f">Division levels<input name="division" placeholder="0.1, 0.25, 0.5"></label>
         <label class="f">Seed<input name="seed" type="number"></label>
       </div>
     </details>
@@ -151,7 +155,9 @@ const ARM_INFO={
 const TASK_INFO={
   flipflop:"Three switches. Each output must hold the sign of the last pulse on its channel.",
   xor:"Two switches. The output is their product, so the stored memories have to interact.",
-  parity:"One channel of identical pulses. The output flips on every pulse, which asks an order-preserving circuit to move the same input in opposite directions."
+  parity:"One channel of identical pulses. The output flips on every pulse, which asks an order-preserving circuit to move the same input in opposite directions.",
+  dose:"Flip-flop where every sequence's pulses are scaled by a random dose, from a third as strong to three times as strong. Cells respond to relative change, not absolute amount; this asks whether the circuit can too.",
+  background:"Flip-flop on top of a slowly wandering background level on every channel. Cells adapt to a steady background and still react to sharp signals; this tests whether the circuit can."
 };
 const $=s=>document.querySelector(s);
 const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -173,7 +179,7 @@ async function init(){
   $("#arms").innerHTML=META.arms.map(a=>chip("arms",a,ARM_INFO[a].label,d.arms.includes(a),armColor(a))).join("");
   const f=$("#form");
   for(const k of ["iters","hidden","lr","batch","train_len","test_len","pulse_prob","substeps","self_excitation","coupling","seed","repeats"]) f.elements[k].value=d[k];
-  f.elements.drift.value=d.drift.join(", ");
+  for(const k of ["drift","noise","division"]) f.elements[k].value=d[k].join(", ");
   $("#ver").textContent=`v${META.version}, ${META.workers} parallel workers`;
   await refreshRuns();
   const first=document.querySelector(".runs button");
@@ -183,7 +189,7 @@ $("#form").addEventListener("submit",async e=>{
   e.preventDefault();
   const f=e.target, fd=new FormData(f);
   const body={name:fd.get("name")||"",tasks:fd.getAll("tasks"),arms:fd.getAll("arms"),
-    drift:(fd.get("drift")||"").split(",").map(s=>parseFloat(s)).filter(x=>!isNaN(x))};
+    drift:nums(fd.get("drift")),noise:nums(fd.get("noise")),division:nums(fd.get("division"))};
   for(const k of ["iters","hidden","batch","train_len","test_len","substeps","seed","repeats"]) body[k]=parseInt(fd.get(k));
   for(const k of ["lr","pulse_prob","self_excitation","coupling"]) body[k]=parseFloat(fd.get(k));
   $("#go").disabled=true; $("#formnote").textContent="";
@@ -201,6 +207,7 @@ async function refreshRuns(){
     :`<li class="note">Runs you start appear here.</li>`;
   document.querySelectorAll(".runs button").forEach(b=>b.onclick=()=>select(b.dataset.id));
 }
+const nums=v=>(v||"").split(",").map(s=>parseFloat(s)).filter(x=>!isNaN(x));
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 async function select(id){
   CURRENT=id; location.hash=id;
@@ -242,8 +249,13 @@ function render(run){
         <td>${stat(rs.map(r=>r.attractors),n0)}</td><td>${stat(rs.map(r=>r.settle_steps),n0)}</td><td>${stat(rs.map(r=>r.negative_edges),n0)}</td><td>${rs[0].params}</td></tr>`}).join("")+`</tbody></table></div>`;
     if(reps>1) h+=`<p class="note">Mean ± standard deviation across seeds. Plates show the first seed.</p>`;
     h+=`<div class="plates">`+groups.map(g=>plate(g.rs[0])).join("")+`</div>`;
-    h+=`<div class="charts"><figure class="chart"><figcaption>Training loss, one line per seed</figcaption>${lossChart(groups)}</figure>
-      <figure class="chart"><figcaption>Test accuracy as weight sizes drift, signs kept, mean across seeds</figcaption>${driftChart(groups)}</figure></div>
+    h+=`<h3 class="sub">Waddington landscape</h3><p class="note">Each map flattens the circuit's states onto their two main directions. Faint lines are 24 random starting states settling; dots are where all 96 end, colored as on the plates. Separate clusters are separate stored memories.</p>
+      <div class="plates">`+groups.map(g=>landscapeFig(g.rs[0])).join("")+`</div>`;
+    h+=`<h3 class="sub">Stress tests</h3><div class="charts"><figure class="chart"><figcaption>Training loss, one line per seed</figcaption>${lossChart(groups)}</figure>
+      <figure class="chart"><figcaption>Weight drift: every connection's strength randomly rescaled, signs kept</figcaption>${stressChart(groups,"drift")}</figure>
+      <figure class="chart"><figcaption>Expression noise: random jitter added to the state at every step</figcaption>${stressChart(groups,"noise")}</figure>
+      <figure class="chart"><figcaption>Cell division: every 40 steps the state is split unevenly, like proteins between daughter cells</figcaption>${stressChart(groups,"division")}</figure></div>
+      <p class="note">Stress charts show test-length accuracy, mean across seeds. The leftmost point is the undisturbed circuit.</p>
       <div class="legend">${groups.map(g=>`<span><i class="dot" style="background:${armColor(g.arm)}"></i> ${ARM_INFO[g.arm].label}</span>`).join("")}</div></section>`;
   }
   if(!hasRes&&!active&&!run.error) h+=`<p class="note">This run finished without results.</p>`;
@@ -283,15 +295,33 @@ function lossChart(groups){
   for(const r of rs) g+=`<polyline fill="none" stroke="${armColor(r.arm)}" stroke-opacity="${op}" stroke-width="1.6" points="${r.curve.map(c=>X(c[0]).toFixed(1)+","+Y(c[1]).toFixed(1)).join(" ")}"/>`;
   return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Training loss per arm and seed, log scale">${g}</svg>`;
 }
-function driftChart(groups){
+function stressChart(groups,key){
   const w=360,h=200,p=42;
-  const pts=groups.map(gr=>{const r0=gr.rs[0];return [[0,mean(gr.rs.map(r=>r.acc_test_len))],...r0.drift.map((d,i)=>[d.eps,mean(gr.rs.map(r=>r.drift[i].acc))])]});
-  const xmax=Math.max(...pts.flat().map(q=>q[0]),0.1);
+  const pts=groups.map(gr=>{const r0=gr.rs[0];const levels=r0[key]||[];
+    const bk=key==="drift"?"drift_base":"stress_base";
+    return [[0,mean(gr.rs.map(r=>r[bk]??r.acc_test_len))],...levels.map((d,i)=>[d.eps,mean(gr.rs.map(r=>(r[key]||[])[i]?.acc??NaN).filter(v=>!isNaN(v)))])]});
+  if(pts.every(q=>q.length<2)) return `<p class="note">Not measured in this run.</p>`;
+  const xmax=Math.max(...pts.flat().map(q=>q[0]),0.01);
   const X=v=>p+(w-10-p)*v/xmax, Y=v=>h-p-(h-p-10)*(v-0.4)/0.6;
-  let g=axes(w,h,p,xmax,0.4,1,`drift ${xmax}`,v=>Math.round(v*100)+"%");
+  let g=axes(w,h,p,xmax,0.4,1,`level ${xmax}`,v=>Math.round(v*100)+"%");
   groups.forEach((gr,i)=>{g+=`<polyline fill="none" stroke="${armColor(gr.arm)}" stroke-width="1.8" points="${pts[i].map(q=>X(q[0]).toFixed(1)+","+Y(Math.max(q[1],0.4)).toFixed(1)).join(" ")}"/>`+
-    pts[i].map(q=>`<circle cx="${X(q[0]).toFixed(1)}" cy="${Y(Math.max(q[1],0.4)).toFixed(1)}" r="3" fill="${armColor(gr.arm)}"><title>${Math.round(q[1]*1000)/10}%</title></circle>`).join("")});
-  return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Mean test accuracy under weight drift per arm">${g}</svg>`;
+    pts[i].map(q=>`<circle cx="${X(q[0]).toFixed(1)}" cy="${Y(Math.max(q[1],0.4)).toFixed(1)}" r="3" fill="${armColor(gr.arm)}"><title>${ARM_INFO[gr.arm].label}, level ${q[0]}: ${Math.round(q[1]*1000)/10}%</title></circle>`).join("")});
+  return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Test accuracy under ${key} per arm">${g}</svg>`;
+}
+function landscapeFig(r){
+  const L=r.landscape; const label=ARM_INFO[r.arm].label;
+  if(!L) return `<figure class="land"><figcaption class="note">${label}: landscape not recorded in this run.</figcaption></figure>`;
+  const w=240,h=180,pad=12;
+  const all=[...L.ends,...L.traj.flat()];
+  const xs=all.map(q=>q[0]), ys=all.map(q=>q[1]);
+  const x0=Math.min(...xs),x1=Math.max(...xs)+1e-9,y0=Math.min(...ys),y1=Math.max(...ys)+1e-9;
+  const X=v=>pad+(w-2*pad)*(v-x0)/(x1-x0), Y=v=>h-pad-(h-2*pad)*(v-y0)/(y1-y0);
+  const col=i=>{const id=L.ids[i];return id===undefined||id<0?"var(--muted)":wellColor(id)};
+  let g=L.traj.map((t,i)=>`<polyline fill="none" stroke="${col(i)}" stroke-opacity=".45" stroke-width="1.1" points="${t.map(q=>X(q[0]).toFixed(1)+","+Y(q[1]).toFixed(1)).join(" ")}"/>`).join("");
+  g+=L.ends.map((q,i)=>`<circle cx="${X(q[0]).toFixed(1)}" cy="${Y(q[1]).toFixed(1)}" r="3.2" fill="${col(i)}" stroke="var(--surface)" stroke-width=".8"/>`).join("");
+  const v=L.var.map(x=>Math.round(x*100));
+  return `<figure class="land plate"><figcaption><b><i class="dot" style="background:${armColor(r.arm)}"></i>${label}</b><span>${v[0]+v[1]}% of variation shown</span></figcaption>
+    <svg viewBox="0 0 ${w} ${h}" role="img" aria-label="${label}: settling trajectories projected onto two main directions">${g}</svg></figure>`;
 }
 init().catch(e=>{$("#main").innerHTML=`<div class="empty"><h2>Server not reachable</h2><p>${esc(e.message)}. Check that the service is running, then reload.</p></div>`});
 </script>
