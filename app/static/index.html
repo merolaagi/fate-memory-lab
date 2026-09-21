@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fate Memory Lab</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧫</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Fraunces:opsz,wght@9..144,500;9..144,700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --agar:#E6ECEF; --surface:#F6F9FA; --ink:#172238; --muted:#56667A; --rule:#C3CFD8; --well:#D3DDE3;
+  --coop:#1F9D57; --broken:#C43D5B; --contract:#3B57D4; --free:#B7840F;
+  --focus:#3B57D4;
+  --body:"Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --display:"Fraunces", Georgia, "Times New Roman", serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{--agar:#141C26; --surface:#1B2532; --ink:#E4EAF0; --muted:#98A7B8; --rule:#2F3D4E; --well:#26323F;
+    --coop:#43C47D; --broken:#E6637F; --contract:#7890F2; --free:#E0AE3C; --focus:#7890F2;}
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--agar);color:var(--ink);font:16px/1.5 var(--body)}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.shell{display:grid;grid-template-columns:320px 1fr;min-height:100vh}
+aside{background:var(--surface);border-right:1px solid var(--rule);padding:28px 22px;display:flex;flex-direction:column;gap:28px}
+main{padding:32px clamp(18px,4vw,48px) 64px;min-width:0}
+h1{font-family:var(--display);font-weight:700;font-size:1.9rem;line-height:1.1;margin:0}
+.lede{color:var(--muted);margin:.4rem 0 0;font-size:.95rem;max-width:34ch}
+h2{font-family:var(--display);font-weight:500;font-size:1.35rem;margin:0 0 .8rem}
+h3{font-size:1rem;margin:0 0 .5rem}
+form{display:grid;gap:14px}
+fieldset{border:0;padding:0;margin:0}
+legend{font-weight:700;margin-bottom:6px}
+.checks{display:flex;flex-wrap:wrap;gap:6px}
+.chip{position:relative}
+.chip input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}
+.chip span{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--rule);border-radius:999px;padding:3px 11px;font-size:.9rem}
+.chip input:checked+span{border-color:var(--ink);background:var(--agar)}
+.chip input:focus-visible+span{outline:2px solid var(--focus);outline-offset:2px}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.actions a{color:var(--muted);font-size:.9rem}
+.sd{color:var(--muted);font-size:.8em}
+label.f{display:grid;gap:3px;font-size:.85rem;color:var(--muted)}
+label.f input{border:1px solid var(--rule);background:var(--agar);border-radius:6px;padding:6px 8px;font-size:.95rem;color:var(--ink);width:100%}
+details summary{cursor:pointer;color:var(--muted);font-size:.9rem}
+details[open] summary{margin-bottom:10px}
+.btn{background:var(--ink);color:var(--surface);border:0;border-radius:8px;padding:10px 14px;font-weight:700;cursor:pointer}
+.btn:disabled{opacity:.5;cursor:wait}
+.btn.ghost{background:transparent;color:var(--muted);border:1px solid var(--rule);font-weight:400;padding:6px 12px}
+.runs{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.runs button{width:100%;text-align:left;background:none;border:0;border-radius:6px;padding:8px 10px;cursor:pointer;display:grid;gap:1px}
+.runs button[aria-current="true"]{background:var(--agar)}
+.runs .nm{font-weight:700;font-size:.92rem}
+.runs .sub{font-size:.8rem;color:var(--muted)}
+.status{font-size:.8rem;font-weight:700}
+.status.running,.status.queued{color:var(--contract)} .status.failed{color:var(--broken)} .status.done{color:var(--coop)}
+.empty{max-width:52ch;margin-top:12vh}
+.empty p{color:var(--muted)}
+.runhead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:22px}
+.runhead p{margin:.2rem 0 0;color:var(--muted);font-size:.9rem}
+.progress{display:grid;gap:6px;margin-bottom:32px;max-width:720px}
+.prow{display:grid;grid-template-columns:90px 1fr;gap:10px;align-items:center;font-size:.85rem}
+.bars{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:4px}
+.bar{height:8px;background:var(--well);border-radius:4px;overflow:hidden}
+.bar i{display:block;height:100%;transition:width .6s}
+section.task{border-top:1px solid var(--rule);padding-top:26px;margin-top:26px}
+.taskhead{display:flex;flex-wrap:wrap;gap:4px 18px;align-items:baseline}
+.taskhead p{margin:0 0 1rem;color:var(--muted);font-size:.92rem;max-width:62ch}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:.92rem;min-width:560px}
+th,td{padding:7px 12px;text-align:right;border-bottom:1px solid var(--rule)}
+td{white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{font-weight:400;color:var(--muted);font-size:.82rem}
+.plates{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:22px;margin:24px 0}
+.plate figcaption{font-size:.85rem;margin-bottom:6px;display:flex;justify-content:space-between;gap:8px}
+.plate figcaption b{display:inline-flex;align-items:center;gap:6px}
+.plate figcaption span{color:var(--muted)}
+.plate svg{width:100%;height:auto;display:block;background:var(--surface);border:1px solid var(--rule);border-radius:14px}
+figure{margin:0}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:22px}
+.chart svg{width:100%;height:auto;display:block}
+.chart figcaption{font-size:.85rem;color:var(--muted);margin-bottom:4px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:.82rem;color:var(--muted);margin-top:6px}
+.err{background:var(--surface);border-left:3px solid var(--broken);padding:10px 14px;white-space:pre-wrap;font-size:.85rem}
+.note{font-size:.82rem;color:var(--muted)}
+@media (max-width:860px){.shell{grid-template-columns:1fr}aside{border-right:0;border-bottom:1px solid var(--rule)}}
+@media (prefers-reduced-motion:reduce){.bar i{transition:none}}
+</style>
+</head>
+<body>
+<div class="shell">
+<aside>
+  <div>
+    <h1>Fate memory lab</h1>
+    <p class="lede">Does a sign-consistent circuit, like the ones cells use to hold their identity, make a better memory layer?</p>
+  </div>
+  <form id="form">
+    <label class="f">Run name<input name="name" placeholder="Optional"></label>
+    <fieldset><legend>Tasks</legend><div class="checks" id="tasks"></div></fieldset>
+    <fieldset><legend>Arms</legend><div class="checks" id="arms"></div></fieldset>
+    <div class="grid3">
+      <label class="f">Training steps<input name="iters" type="number" min="10" max="20000"></label>
+      <label class="f">Hidden units<input name="hidden" type="number" min="4" max="128"></label>
+      <label class="f">Seeds per arm<input name="repeats" type="number" min="1" max="10"></label>
+    </div>
+    <details>
+      <summary>More settings</summary>
+      <div class="grid2">
+        <label class="f">Learning rate<input name="lr" type="number" step="0.001" min="0.0001"></label>
+        <label class="f">Batch<input name="batch" type="number" min="1"></label>
+        <label class="f">Train length<input name="train_len" type="number" min="10"></label>
+        <label class="f">Test length<input name="test_len" type="number" min="10"></label>
+        <label class="f">Pulse chance<input name="pulse_prob" type="number" step="0.01" min="0.01" max="0.99"></label>
+        <label class="f">Substeps<input name="substeps" type="number" min="1" max="10"></label>
+        <label class="f">Self-excitation<input name="self_excitation" type="number" step="0.5" min="0"></label>
+        <label class="f">Coupling<input name="coupling" type="number" step="0.01" min="0"></label>
+        <label class="f">Drift levels<input name="drift" placeholder="0.1, 0.2, 0.3"></label>
+        <label class="f">Seed<input name="seed" type="number"></label>
+      </div>
+    </details>
+    <button class="btn" id="go" type="submit">Start run</button>
+    <p class="note" id="formnote"></p>
+  </form>
+  <div>
+    <h3>Runs</h3>
+    <ul class="runs" id="runs"></ul>
+  </div>
+  <p class="note" id="ver"></p>
+</aside>
+<main id="main">
+  <div class="empty">
+    <h2>No run selected</h2>
+    <p>Start a run on the left. Each task trains all four arms side by side from identical starting weights, then drops 96 random starting states into every trained circuit and records where each one settles.</p>
+  </div>
+</main>
+</div>
+<script>
+const ARM_INFO={
+  coop:{label:"Sign-consistent",desc:"No negative cycles. Theorem guarantees settling."},
+  broken:{label:"One cycle flipped",desc:"Identical except one negative cycle."},
+  contract:{label:"Contraction",desc:"Unique equilibrium, so no stored state."},
+  free:{label:"Unconstrained",desc:"Any weights. No guarantee."}
+};
+const TASK_INFO={
+  flipflop:"Three switches. Each output must hold the sign of the last pulse on its channel.",
+  xor:"Two switches. The output is their product, so the stored memories have to interact.",
+  parity:"One channel of identical pulses. The output flips on every pulse, which asks an order-preserving circuit to move the same input in opposite directions."
+};
+const $=s=>document.querySelector(s);
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const armColor=a=>css("--"+a);
+let META=null, CURRENT=null, POLL=null;
+
+async function api(path,opts){
+  const r=await fetch(path,opts);
+  if(!r.ok){let m=r.statusText;try{m=(await r.json()).detail||m}catch(e){}throw new Error(typeof m==="string"?m:JSON.stringify(m))}
+  return r.json();
+}
+function chip(group,value,label,checked,color){
+  return `<label class="chip"><input type="checkbox" name="${group}" value="${value}" ${checked?"checked":""}><span>${color?`<i class="dot" style="background:${color}"></i>`:""}${label}</span></label>`;
+}
+async function init(){
+  META=await api("/api/meta");
+  const d=META.defaults;
+  $("#tasks").innerHTML=META.tasks.map(t=>chip("tasks",t,t,d.tasks.includes(t))).join("");
+  $("#arms").innerHTML=META.arms.map(a=>chip("arms",a,ARM_INFO[a].label,d.arms.includes(a),armColor(a))).join("");
+  const f=$("#form");
+  for(const k of ["iters","hidden","lr","batch","train_len","test_len","pulse_prob","substeps","self_excitation","coupling","seed","repeats"]) f.elements[k].value=d[k];
+  f.elements.drift.value=d.drift.join(", ");
+  $("#ver").textContent=`v${META.version}, ${META.workers} parallel workers`;
+  await refreshRuns();
+  const first=document.querySelector(".runs button");
+  if(location.hash.length>1) select(location.hash.slice(1)); else if(first) select(first.dataset.id);
+}
+$("#form").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const f=e.target, fd=new FormData(f);
+  const body={name:fd.get("name")||"",tasks:fd.getAll("tasks"),arms:fd.getAll("arms"),
+    drift:(fd.get("drift")||"").split(",").map(s=>parseFloat(s)).filter(x=>!isNaN(x))};
+  for(const k of ["iters","hidden","batch","train_len","test_len","substeps","seed","repeats"]) body[k]=parseInt(fd.get(k));
+  for(const k of ["lr","pulse_prob","self_excitation","coupling"]) body[k]=parseFloat(fd.get(k));
+  $("#go").disabled=true; $("#formnote").textContent="";
+  try{const run=await api("/api/runs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    f.elements.name.value=""; await refreshRuns(); select(run.id);
+    $("#formnote").textContent="Run started.";
+  }catch(err){$("#formnote").textContent="Run not started: "+err.message}
+  $("#go").disabled=false;
+});
+async function refreshRuns(){
+  const runs=await api("/api/runs");
+  $("#runs").innerHTML=runs.length?runs.map(r=>`<li><button data-id="${r.id}" aria-current="${r.id===CURRENT}">
+    <span class="nm">${esc(r.name)}</span>
+    <span class="sub"><span class="status ${r.status}">${r.status}</span>, ${r.tasks.join(", ")}, ${r.iters} steps, ${r.repeats} seed${r.repeats===1?"":"s"}</span></button></li>`).join("")
+    :`<li class="note">Runs you start appear here.</li>`;
+  document.querySelectorAll(".runs button").forEach(b=>b.onclick=()=>select(b.dataset.id));
+}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+async function select(id){
+  CURRENT=id; location.hash=id;
+  document.querySelectorAll(".runs button").forEach(b=>b.setAttribute("aria-current",b.dataset.id===id));
+  clearTimeout(POLL); await load();
+}
+async function load(){
+  if(!CURRENT) return;
+  let run; try{run=await api("/api/runs/"+CURRENT)}catch(e){$("#main").innerHTML=`<div class="empty"><h2>Run not found</h2><p>It may have been deleted. Pick another run on the left.</p></div>`;return}
+  render(run);
+  if(run.status==="queued"||run.status==="running"){POLL=setTimeout(load,1500)}else{refreshRuns()}
+}
+const mean=a=>a.reduce((x,y)=>x+y,0)/a.length;
+const sdev=a=>a.length<2?0:Math.sqrt(a.reduce((x,y)=>x+(y-mean(a))**2,0)/(a.length-1));
+function stat(vals,fmt){vals=vals.filter(v=>v!==null&&v!==undefined);if(!vals.length)return"–";
+  return fmt(mean(vals))+(vals.length>1?` <span class="sd">± ${fmt(sdev(vals))}</span>`:"")}
+function render(run){
+  const c=run.config, active=run.status==="queued"||run.status==="running", reps=c.repeats||1;
+  const when=new Date(run.created*1000).toLocaleString();
+  const hasRes=run.results.length>0;
+  let h=`<div class="runhead"><div><h2>${esc(run.name)}</h2>
+    <p><span class="status ${run.status}">${run.status}</span>. Started ${when}. ${c.iters} steps, ${c.hidden} units, ${reps} seed${reps===1?"":"s"} per arm, trained on ${c.train_len}, tested on ${c.test_len}.</p></div>
+    <div class="actions">${hasRes?`<a href="/api/runs/${run.id}/export.csv">Download CSV</a><a href="/api/runs/${run.id}/export.json">Download JSON</a>`:""}
+    ${active?`<button class="btn ghost" id="stop">Stop run</button>`:`<button class="btn ghost" id="del">Delete run</button>`}</div></div>`;
+  if(run.error) h+=`<div class="err">${esc(run.error)}</div>`;
+  if(active){
+    h+=`<div class="progress">`+c.tasks.map(t=>`<div class="prow"><span>${t}</span><div class="bars">`+
+      c.arms.map(a=>{let f=0;for(let r=0;r<reps;r++)f+=run.progress[`${t}__${a}__${r}`]||0;f/=reps;
+        return `<div class="bar" title="${t}, ${ARM_INFO[a].label}, ${Math.round(f*100)}%"><i style="width:${Math.round(f*100)}%;background:${armColor(a)}"></i></div>`}).join("")+`</div></div>`).join("")+`</div>`;
+  }
+  for(const t of c.tasks){
+    const groups=c.arms.map(a=>({arm:a,rs:run.results.filter(r=>r.task===t&&r.arm===a).sort((x,y)=>(x.rep||0)-(y.rep||0))})).filter(g=>g.rs.length);
+    if(!groups.length) continue;
+    const p1=x=>(x*100).toFixed(1)+"%", n0=x=>x.toFixed(0);
+    h+=`<section class="task"><div class="taskhead"><h2>${t}</h2><p>${TASK_INFO[t]}</p></div>`;
+    h+=`<div class="tablewrap"><table><thead><tr><th>Arm</th><th>Seeds</th><th>Accuracy, train length</th><th>Accuracy, test length</th><th>Runs that settled</th><th>Attractors</th><th>Steps to settle</th><th>Negative edges</th><th>Params</th></tr></thead><tbody>`+
+      groups.map(g=>{const rs=g.rs;return `<tr><td><i class="dot" style="background:${armColor(g.arm)}"></i> ${ARM_INFO[g.arm].label}</td><td>${rs.length}</td>
+        <td>${stat(rs.map(r=>r.acc_train_len),p1)}</td><td>${stat(rs.map(r=>r.acc_test_len),p1)}</td><td>${stat(rs.map(r=>r.settled),p1)}</td>
+        <td>${stat(rs.map(r=>r.attractors),n0)}</td><td>${stat(rs.map(r=>r.settle_steps),n0)}</td><td>${stat(rs.map(r=>r.negative_edges),n0)}</td><td>${rs[0].params}</td></tr>`}).join("")+`</tbody></table></div>`;
+    if(reps>1) h+=`<p class="note">Mean ± standard deviation across seeds. Plates show the first seed.</p>`;
+    h+=`<div class="plates">`+groups.map(g=>plate(g.rs[0])).join("")+`</div>`;
+    h+=`<div class="charts"><figure class="chart"><figcaption>Training loss, one line per seed</figcaption>${lossChart(groups)}</figure>
+      <figure class="chart"><figcaption>Test accuracy as weight sizes drift, signs kept, mean across seeds</figcaption>${driftChart(groups)}</figure></div>
+      <div class="legend">${groups.map(g=>`<span><i class="dot" style="background:${armColor(g.arm)}"></i> ${ARM_INFO[g.arm].label}</span>`).join("")}</div></section>`;
+  }
+  if(!hasRes&&!active&&!run.error) h+=`<p class="note">This run finished without results.</p>`;
+  if(active&&!hasRes) h+=`<p class="note">Each task, arm and seed trains in its own process. Results appear here as each one finishes.</p>`;
+  $("#main").innerHTML=h;
+  const del=$("#del"); if(del) del.onclick=async()=>{if(!confirm("Delete this run?"))return;await api("/api/runs/"+run.id,{method:"DELETE"});CURRENT=null;location.hash="";$("#main").innerHTML=`<div class="empty"><h2>Run deleted</h2><p>Pick another run or start a new one.</p></div>`;refreshRuns()};
+  const stop=$("#stop"); if(stop) stop.onclick=async()=>{stop.disabled=true;stop.textContent="Stopping";try{await api(`/api/runs/${run.id}/cancel`,{method:"POST"})}catch(e){stop.textContent=e.message}};
+}
+const pct=x=>(x*100).toFixed(1)+"%";
+function wellColor(id){return `hsl(${(190+id*137.508)%360} 55% 52%)`}
+function plate(r){
+  const W=12,H=8,s=22,pad=14;
+  let cells="";
+  r.wells.forEach((id,i)=>{
+    const x=pad+(i%W)*s+s/2, y=pad+Math.floor(i/W)*s+s/2;
+    cells+=id<0?`<circle cx="${x}" cy="${y}" r="7.5" fill="none" stroke="var(--ink)" stroke-width="1.5" stroke-dasharray="2 2"><title>Did not settle</title></circle>`
+      :`<circle cx="${x}" cy="${y}" r="8" fill="${wellColor(id)}"><title>Attractor ${id+1}</title></circle>`;
+  });
+  for(let i=r.wells.length;i<W*H;i++){const x=pad+(i%W)*s+s/2,y=pad+Math.floor(i/W)*s+s/2;cells+=`<circle cx="${x}" cy="${y}" r="8" fill="var(--well)"/>`}
+  return `<figure class="plate"><figcaption><b><i class="dot" style="background:${armColor(r.arm)}"></i>${ARM_INFO[r.arm].label}</b><span>${r.attractors} attractor${r.attractors===1?"":"s"}</span></figcaption>
+    <svg viewBox="0 0 ${W*s+2*pad} ${H*s+2*pad}" role="img" aria-label="${ARM_INFO[r.arm].label}: 96 starting states, ${r.attractors} attractors, ${pct(r.settled)} settled">${cells}</svg></figure>`;
+}
+function axes(w,h,p,xmax,ymin,ymax,xl,yfmt){
+  let g=`<line x1="${p}" y1="${h-p}" x2="${w-10}" y2="${h-p}" stroke="var(--rule)"/><line x1="${p}" y1="10" x2="${p}" y2="${h-p}" stroke="var(--rule)"/>`;
+  for(let k=0;k<=4;k++){const v=ymin+(ymax-ymin)*k/4,y=h-p-(h-p-10)*k/4;g+=`<text x="${p-6}" y="${y+4}" font-size="10" text-anchor="end" fill="var(--muted)">${yfmt(v)}</text>`}
+  g+=`<text x="${w-10}" y="${h-p+16}" font-size="10" text-anchor="end" fill="var(--muted)">${xl}</text>`;
+  return g;
+}
+function lossChart(groups){
+  const w=360,h=200,p=42, rs=groups.flatMap(g=>g.rs);
+  const all=rs.flatMap(r=>r.curve.map(c=>c[1])).filter(v=>v>0);
+  const lo=Math.log10(Math.min(...all)),hi=Math.log10(Math.max(...all))+1e-9;
+  const xmax=Math.max(...rs.flatMap(r=>r.curve.map(c=>c[0])));
+  const X=v=>p+(w-10-p)*v/xmax, Y=v=>h-p-(h-p-10)*(Math.log10(Math.max(v,1e-12))-lo)/(hi-lo);
+  let g=axes(w,h,p,xmax,lo,hi,`step ${xmax}`,v=>Math.pow(10,v).toPrecision(2));
+  const op=rs.length>groups.length?0.55:1;
+  for(const r of rs) g+=`<polyline fill="none" stroke="${armColor(r.arm)}" stroke-opacity="${op}" stroke-width="1.6" points="${r.curve.map(c=>X(c[0]).toFixed(1)+","+Y(c[1]).toFixed(1)).join(" ")}"/>`;
+  return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Training loss per arm and seed, log scale">${g}</svg>`;
+}
+function driftChart(groups){
+  const w=360,h=200,p=42;
+  const pts=groups.map(gr=>{const r0=gr.rs[0];return [[0,mean(gr.rs.map(r=>r.acc_test_len))],...r0.drift.map((d,i)=>[d.eps,mean(gr.rs.map(r=>r.drift[i].acc))])]});
+  const xmax=Math.max(...pts.flat().map(q=>q[0]),0.1);
+  const X=v=>p+(w-10-p)*v/xmax, Y=v=>h-p-(h-p-10)*(v-0.4)/0.6;
+  let g=axes(w,h,p,xmax,0.4,1,`drift ${xmax}`,v=>Math.round(v*100)+"%");
+  groups.forEach((gr,i)=>{g+=`<polyline fill="none" stroke="${armColor(gr.arm)}" stroke-width="1.8" points="${pts[i].map(q=>X(q[0]).toFixed(1)+","+Y(Math.max(q[1],0.4)).toFixed(1)).join(" ")}"/>`+
+    pts[i].map(q=>`<circle cx="${X(q[0]).toFixed(1)}" cy="${Y(Math.max(q[1],0.4)).toFixed(1)}" r="3" fill="${armColor(gr.arm)}"><title>${Math.round(q[1]*1000)/10}%</title></circle>`).join("")});
+  return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Mean test accuracy under weight drift per arm">${g}</svg>`;
+}
+init().catch(e=>{$("#main").innerHTML=`<div class="empty"><h2>Server not reachable</h2><p>${esc(e.message)}. Check that the service is running, then reload.</p></div>`});
+</script>
+</body>
+</html>
