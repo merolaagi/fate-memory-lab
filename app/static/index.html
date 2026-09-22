@@ -107,6 +107,8 @@ figure{margin:0}
     <label class="f">Run name<input name="name" placeholder="Optional"></label>
     <fieldset><legend>Tasks</legend><div class="checks" id="tasks"></div></fieldset>
     <fieldset><legend>Arms</legend><div class="checks" id="arms"></div></fieldset>
+    <fieldset><legend>Membrane</legend><div class="checks" id="membranes"></div>
+      <p class="note" id="memnote"></p></fieldset>
     <div class="grid3">
       <label class="f">Training steps<input name="iters" type="number" min="10" max="20000"></label>
       <label class="f">Hidden units<input name="hidden" type="number" min="4" max="128"></label>
@@ -126,6 +128,7 @@ figure{margin:0}
         <label class="f">Drift levels<input name="drift" placeholder="0.1, 0.2, 0.3"></label>
         <label class="f">Noise levels<input name="noise" placeholder="0.02, 0.05, 0.1"></label>
         <label class="f">Division levels<input name="division" placeholder="0.1, 0.25, 0.5"></label>
+        <label class="f">Inhibitor levels<input name="inhibitor" placeholder="0.1, 0.25, 0.5"></label>
         <label class="f">Seed<input name="seed" type="number"></label>
       </div>
     </details>
@@ -152,11 +155,18 @@ const ARM_INFO={
   contract:{label:"Contraction",desc:"Unique equilibrium, so no stored state."},
   free:{label:"Unconstrained",desc:"Any weights. No guarantee."}
 };
+const MEM_INFO={
+  direct:{label:"None",desc:"Signals reach the circuit directly, as in earlier versions."},
+  transporter:{label:"Transporter",desc:"Signals enter through saturating transporters, like proteins carried across a membrane. Intake levels off at high concentration; the network learns each transporter's capacity and affinity."},
+  gated:{label:"Gated channel",desc:"Transporters plus gates the circuit opens and closes itself, so the cell controls its own intake. Signs are arranged so the sign-consistent arm keeps its guarantee."}
+};
 const TASK_INFO={
   flipflop:"Three switches. Each output must hold the sign of the last pulse on its channel.",
   xor:"Two switches. The output is their product, so the stored memories have to interact.",
   parity:"One channel of identical pulses. The output flips on every pulse, which asks an order-preserving circuit to move the same input in opposite directions.",
   dose:"Flip-flop where every sequence's pulses are scaled by a random dose, from a third as strong to three times as strong. Cells respond to relative change, not absolute amount; this asks whether the circuit can too.",
+  commit:"A drug arrives either as brief strong spikes or as longer, weaker exposures. Once the cell's accumulated exposure crosses a threshold it commits, the way a cell commits to dividing or dying, and the output must switch on and stay on for good. Brief spikes alone should never trigger it.",
+  antagonist:"Two drugs compete for one receptor: an agonist that activates it and an antagonist that blocks it, both drifting slowly. The output is on while the receptor is more than half occupied by the agonist. No memory needed, so even the contraction arm can do well here.",
   background:"Flip-flop on top of a slowly wandering background level on every channel. Cells adapt to a steady background and still react to sharp signals; this tests whether the circuit can."
 };
 const $=s=>document.querySelector(s);
@@ -179,7 +189,10 @@ async function init(){
   $("#arms").innerHTML=META.arms.map(a=>chip("arms",a,ARM_INFO[a].label,d.arms.includes(a),armColor(a))).join("");
   const f=$("#form");
   for(const k of ["iters","hidden","lr","batch","train_len","test_len","pulse_prob","substeps","self_excitation","coupling","seed","repeats"]) f.elements[k].value=d[k];
-  for(const k of ["drift","noise","division"]) f.elements[k].value=d[k].join(", ");
+  for(const k of ["drift","noise","division","inhibitor"]) f.elements[k].value=d[k].join(", ");
+  $("#membranes").innerHTML=META.membranes.map(m=>`<label class="chip"><input type="radio" name="membrane" value="${m}" ${m===d.membrane?"checked":""}><span>${MEM_INFO[m].label}</span></label>`).join("");
+  const memNote=()=>{$("#memnote").textContent=MEM_INFO[f.elements.membrane.value].desc};
+  f.querySelectorAll('input[name="membrane"]').forEach(i=>i.onchange=memNote); memNote();
   $("#ver").textContent=`v${META.version}, ${META.workers} parallel workers`;
   await refreshRuns();
   const first=document.querySelector(".runs button");
@@ -189,7 +202,8 @@ $("#form").addEventListener("submit",async e=>{
   e.preventDefault();
   const f=e.target, fd=new FormData(f);
   const body={name:fd.get("name")||"",tasks:fd.getAll("tasks"),arms:fd.getAll("arms"),
-    drift:nums(fd.get("drift")),noise:nums(fd.get("noise")),division:nums(fd.get("division"))};
+    drift:nums(fd.get("drift")),noise:nums(fd.get("noise")),division:nums(fd.get("division")),
+    inhibitor:nums(fd.get("inhibitor")),membrane:fd.get("membrane")||"direct"};
   for(const k of ["iters","hidden","batch","train_len","test_len","substeps","seed","repeats"]) body[k]=parseInt(fd.get(k));
   for(const k of ["lr","pulse_prob","self_excitation","coupling"]) body[k]=parseFloat(fd.get(k));
   $("#go").disabled=true; $("#formnote").textContent="";
@@ -203,7 +217,7 @@ async function refreshRuns(){
   const runs=await api("/api/runs");
   $("#runs").innerHTML=runs.length?runs.map(r=>`<li><button data-id="${r.id}" aria-current="${r.id===CURRENT}">
     <span class="nm">${esc(r.name)}</span>
-    <span class="sub"><span class="status ${r.status}">${r.status}</span>, ${r.tasks.join(", ")}, ${r.iters} steps, ${r.repeats} seed${r.repeats===1?"":"s"}</span></button></li>`).join("")
+    <span class="sub"><span class="status ${r.status}">${r.status}</span>, ${r.tasks.join(", ")}, ${r.iters} steps, ${r.repeats} seed${r.repeats===1?"":"s"}${r.membrane&&r.membrane!=="direct"?", "+MEM_INFO[r.membrane].label.toLowerCase():""}</span></button></li>`).join("")
     :`<li class="note">Runs you start appear here.</li>`;
   document.querySelectorAll(".runs button").forEach(b=>b.onclick=()=>select(b.dataset.id));
 }
@@ -229,7 +243,7 @@ function render(run){
   const when=new Date(run.created*1000).toLocaleString();
   const hasRes=run.results.length>0;
   let h=`<div class="runhead"><div><h2>${esc(run.name)}</h2>
-    <p><span class="status ${run.status}">${run.status}</span>. Started ${when}. ${c.iters} steps, ${c.hidden} units, ${reps} seed${reps===1?"":"s"} per arm, trained on ${c.train_len}, tested on ${c.test_len}.</p></div>
+    <p><span class="status ${run.status}">${run.status}</span>. Started ${when}. ${c.iters} steps, ${c.hidden} units, ${reps} seed${reps===1?"":"s"} per arm, membrane: ${MEM_INFO[c.membrane||"direct"].label.toLowerCase()}, trained on ${c.train_len}, tested on ${c.test_len}.</p></div>
     <div class="actions">${hasRes?`<a href="/api/runs/${run.id}/export.csv">Download CSV</a><a href="/api/runs/${run.id}/export.json">Download JSON</a>`:""}
     ${active?`<button class="btn ghost" id="stop">Stop run</button>`:`<button class="btn ghost" id="del">Delete run</button>`}</div></div>`;
   if(run.error) h+=`<div class="err">${esc(run.error)}</div>`;
@@ -254,7 +268,9 @@ function render(run){
     h+=`<h3 class="sub">Stress tests</h3><div class="charts"><figure class="chart"><figcaption>Training loss, one line per seed</figcaption>${lossChart(groups)}</figure>
       <figure class="chart"><figcaption>Weight drift: every connection's strength randomly rescaled, signs kept</figcaption>${stressChart(groups,"drift")}</figure>
       <figure class="chart"><figcaption>Expression noise: random jitter added to the state at every step</figcaption>${stressChart(groups,"noise")}</figure>
-      <figure class="chart"><figcaption>Cell division: every 40 steps the state is split unevenly, like proteins between daughter cells</figcaption>${stressChart(groups,"division")}</figure></div>
+      <figure class="chart"><figcaption>Cell division: every 40 steps the state is split unevenly, like proteins between daughter cells</figcaption>${stressChart(groups,"division")}</figure>
+      <figure class="chart"><figcaption>Inhibitor drug: a fraction of the circuit's units partly blocked, to 30% of their activity</figcaption>${stressChart(groups,"inhibitor")}</figure>
+      ${groups[0].rs[0].uptake?`<figure class="chart"><figcaption>Membrane uptake: how much signal gets in at each outside concentration, learned transporters averaged</figcaption>${uptakeChart(groups)}</figure>`:""}</div>
       <p class="note">Stress charts show test-length accuracy, mean across seeds. The leftmost point is the undisturbed circuit.</p>
       <div class="legend">${groups.map(g=>`<span><i class="dot" style="background:${armColor(g.arm)}"></i> ${ARM_INFO[g.arm].label}</span>`).join("")}</div></section>`;
   }
@@ -307,6 +323,15 @@ function stressChart(groups,key){
   groups.forEach((gr,i)=>{g+=`<polyline fill="none" stroke="${armColor(gr.arm)}" stroke-width="1.8" points="${pts[i].map(q=>X(q[0]).toFixed(1)+","+Y(Math.max(q[1],0.4)).toFixed(1)).join(" ")}"/>`+
     pts[i].map(q=>`<circle cx="${X(q[0]).toFixed(1)}" cy="${Y(Math.max(q[1],0.4)).toFixed(1)}" r="3" fill="${armColor(gr.arm)}"><title>${ARM_INFO[gr.arm].label}, level ${q[0]}: ${Math.round(q[1]*1000)/10}%</title></circle>`).join("")});
   return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Test accuracy under ${key} per arm">${g}</svg>`;
+}
+function uptakeChart(groups){
+  const w=360,h=200,p=42;
+  const curves=groups.map(g=>{const u0=g.rs[0].uptake;return {arm:g.arm,x:u0.x,y:u0.x.map((_,i)=>mean(g.rs.map(r=>r.uptake.y[i])))}});
+  const ymax=Math.max(...curves.flatMap(c=>c.y),0.1), xmax=Math.max(...curves[0].x);
+  const X=v=>p+(w-10-p)*v/xmax, Y=v=>h-p-(h-p-10)*v/ymax;
+  let g=axes(w,h,p,xmax,0,ymax,`outside ${xmax}`,v=>v.toFixed(2));
+  for(const c of curves) g+=`<polyline fill="none" stroke="${armColor(c.arm)}" stroke-width="1.8" points="${c.x.map((x,i)=>X(x).toFixed(1)+","+Y(c.y[i]).toFixed(1)).join(" ")}"/>`;
+  return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Learned membrane uptake curves per arm">${g}</svg>`;
 }
 function landscapeFig(r){
   const L=r.landscape; const label=ARM_INFO[r.arm].label;

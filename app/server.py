@@ -16,7 +16,9 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 from . import __version__
-from .engine import ARMS, DEFAULTS, TASKS, Cancelled, run_job
+from typing import Literal
+
+from .engine import ARMS, DEFAULTS, MEMBRANES, TASKS, Cancelled, run_job
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = Path(os.environ.get("FML_DATA", ROOT / "data" / "runs"))
@@ -46,6 +48,8 @@ class RunConfig(BaseModel):
     drift: list[float] = Field(default_factory=lambda: list(DEFAULTS["drift"]))
     noise: list[float] = Field(default_factory=lambda: list(DEFAULTS["noise"]))
     division: list[float] = Field(default_factory=lambda: list(DEFAULTS["division"]))
+    inhibitor: list[float] = Field(default_factory=lambda: list(DEFAULTS["inhibitor"]))
+    membrane: Literal["direct", "transporter", "gated"] = DEFAULTS["membrane"]
     seed: int = DEFAULTS["seed"]
     repeats: int = Field(DEFAULTS["repeats"], ge=1, le=10)
 
@@ -173,7 +177,8 @@ def health():
 
 @app.get("/api/meta")
 def meta():
-    return {"version": __version__, "defaults": DEFAULTS, "arms": ARMS, "tasks": list(TASKS), "workers": WORKERS}
+    return {"version": __version__, "defaults": DEFAULTS, "arms": ARMS, "tasks": list(TASKS),
+            "membranes": MEMBRANES, "workers": WORKERS}
 
 
 @app.post("/api/runs")
@@ -186,6 +191,7 @@ def create_run(cfg: RunConfig):
     c["drift"] = [float(e) for e in c["drift"] if 0 <= float(e) <= 3][:6]
     c["noise"] = [float(e) for e in c["noise"] if 0 <= float(e) <= 1][:6]
     c["division"] = [float(e) for e in c["division"] if 0 <= float(e) <= 3][:6]
+    c["inhibitor"] = [float(e) for e in c["inhibitor"] if 0 < float(e) <= 1][:6]
     rid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
     run = {"id": rid, "name": c.pop("name") or rid, "created": time.time(), "config": c,
            "status": "queued", "results": [], "version": __version__}
@@ -203,7 +209,8 @@ def list_runs():
         r = json.loads(p.read_text())
         c = r["config"]
         out.append({"id": r["id"], "name": r["name"], "status": r["status"], "created": r["created"],
-                    "tasks": c["tasks"], "arms": c["arms"], "iters": c["iters"], "repeats": c.get("repeats", 1)})
+                    "tasks": c["tasks"], "arms": c["arms"], "iters": c["iters"], "repeats": c.get("repeats", 1),
+                    "membrane": c.get("membrane", "direct")})
     return out
 
 
@@ -257,16 +264,19 @@ def export_csv(rid: str):
     w = csv.writer(buf)
     c = run["config"]
     drift_eps, noise_eps, div_eps = c["drift"], c.get("noise", []), c.get("division", [])
-    w.writerow(["task", "arm", "rep", "seed", "params", "acc_train_len", "acc_test_len", "settled",
+    inh_eps = c.get("inhibitor", [])
+    w.writerow(["task", "arm", "rep", "seed", "membrane", "params", "acc_train_len", "acc_test_len", "settled",
                 "attractors", "settle_steps", "negative_edges", "seconds"]
                + [f"drift_{e}_acc" for e in drift_eps] + [f"drift_{e}_settled" for e in drift_eps]
-               + [f"noise_{e}_acc" for e in noise_eps] + [f"division_{e}_acc" for e in div_eps])
+               + [f"noise_{e}_acc" for e in noise_eps] + [f"division_{e}_acc" for e in div_eps]
+               + [f"inhibitor_{e}_acc" for e in inh_eps])
     for r in sorted(run["results"], key=lambda r: (r["task"], r["arm"], r.get("rep", 0))):
-        w.writerow([r["task"], r["arm"], r.get("rep", 0), r.get("seed", ""), r["params"], r["acc_train_len"],
+        w.writerow([r["task"], r["arm"], r.get("rep", 0), r.get("seed", ""), r.get("membrane", "direct"), r["params"], r["acc_train_len"],
                     r["acc_test_len"], r["settled"], r["attractors"], r.get("settle_steps", ""),
                     r["negative_edges"], r["seconds"]]
                    + [d["acc"] for d in r["drift"]] + [d["settled"] for d in r["drift"]]
-                   + [d["acc"] for d in r.get("noise", [])] + [d["acc"] for d in r.get("division", [])])
+                   + [d["acc"] for d in r.get("noise", [])] + [d["acc"] for d in r.get("division", [])]
+                   + [d["acc"] for d in r.get("inhibitor", [])])
     return Response(buf.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": f'attachment; filename="fate-memory-{rid}.csv"'})
 

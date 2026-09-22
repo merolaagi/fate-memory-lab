@@ -43,6 +43,20 @@ two behave differently, that one broken condition is the reason.
 | **parity** | Identical pulses on one channel | An output that flips on every pulse | The same input must push the state up one time and down the next, which is the hardest case for a sign-consistent circuit |
 | **dose** | Flip-flop pulses scaled by a random strength per sequence, from 0.3× to 3× | The same as flipflop | Cells respond to relative change rather than absolute amount. Can the circuit ignore the dose? |
 | **background** | Flip-flop pulses on top of a slowly wandering background level | The same as flipflop | Cells adapt to steady backgrounds yet still react to sharp signals. Can the circuit tell a pulse from a drifting baseline? |
+| **commit** | A drug arriving as brief strong spikes or longer, weaker exposures | Off until the accumulated exposure crosses a threshold, then on for good | Cells commit to dividing, differentiating or dying only after sustained signals, and never go back. Brief spikes alone must not trigger it |
+| **antagonist** | An agonist and a competing antagonist, both drifting slowly | On while the receptor is more than half occupied by the agonist | Classic receptor pharmacology. It needs no memory, so it shows where even the contraction arm is competitive |
+
+## The membrane
+
+Real cells don't let signals straight in. Molecules cross the membrane through transporters that fill up at high
+concentrations, and through channels the cell opens and closes itself. Each run picks one membrane, applied
+identically to every arm so the comparison stays fair:
+
+| Membrane | How signals get in |
+|---|---|
+| **None** | Straight into the circuit, as in earlier versions |
+| **Transporter** | Each signal is split into a positive and a negative "molecule", and each crosses through a saturating transporter: intake = capacity × concentration / (affinity constant + concentration), the Michaelis–Menten law. The network learns every transporter's capacity and affinity |
+| **Gated channel** | Transporters plus gates controlled by the circuit's own state, so the cell regulates its own intake. For the sign-consistent arm and its control, the signs of the gates and inputs are chosen so the loop through the membrane adds no negative cycle and the settling guarantee still holds |
 
 Networks train on short sequences and are then tested on sequences several times longer, to check whether their
 memory actually holds over time rather than just fitting the training length.
@@ -74,6 +88,7 @@ if it ever crashes. To run it in the terminal instead, use `./run.sh`.
 The panel on the left is the run form.
 
 - **Tasks**: pick one or more. Each task trains its own set of arms.
+- **Membrane**: how signals enter the circuit. See *The membrane* above.
 - **Arms**: all four are selected by default. Keep them all for a fair comparison.
 - **Training steps**: how long each network trains. 500 is a quick look; 3000 or more gives results worth reading,
   especially for parity.
@@ -131,6 +146,11 @@ disturbance grows. The leftmost point is the undisturbed circuit.
   actually expressed.
 - *Cell division*: every 40 steps the state is split unevenly, the way proteins are shared unequally between two
   daughter cells. A good memory should survive the split.
+- *Inhibitor drug*: a drug partly blocks a random fraction of the circuit's units, cutting their activity to 30%,
+  the way an inhibitor knocks down a protein. The level is the fraction of units blocked.
+
+With a transporter or gated membrane, a *membrane uptake* chart also shows the learned intake curve for each arm:
+how much signal gets in at each outside concentration.
 
 *Training loss* shows how each arm learned, one line per seed.
 
@@ -153,7 +173,8 @@ These are early, small-scale observations, not conclusions.
 - On xor, the unconstrained arm was slightly more accurate than the sign-consistent one in early tests.
 - Parity is the open question. Short training runs haven't solved it for any arm.
 - Results vary noticeably between seeds, which is why the app defaults to three.
-- The dose, background, expression-noise and cell-division tests are new in 0.3.0 and have no results yet.
+- The dose, background, expression-noise and cell-division tests are new in 0.3.0; the membrane, the drug tasks and
+  the inhibitor test are new in 0.4.0. None have full-length results yet.
 
 ---
 

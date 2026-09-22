@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+- Membrane input stage for every arm: none, saturating Michaelis-Menten transporters, or transporters with gates the circuit controls itself
+- Sign-consistent arm keeps its guarantee through gated channels, by construction of the gate and input signs
+- Two drug tasks: commit (irreversible commitment after sustained exposure, not brief spikes) and antagonist (competitive receptor binding)
+- Inhibitor stress test: a drug partly blocks a random fraction of units
+- Membrane uptake chart showing each arm's learned intake curve
+- CSV exports include membrane and inhibitor results
+
 ## 0.3.0
 - Two new cell-inspired tasks: dose (random signal strength per sequence) and background (slowly wandering baseline)
 - Two new stress tests: expression noise on the state, and uneven partitioning at cell division every 40 steps
