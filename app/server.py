@@ -21,7 +21,7 @@ from typing import Literal
 
 from .engine import ARMS, DEFAULTS, MEMBRANES, TASKS, Cancelled, run_job
 from .explain import LABEL, explain
-from .pathways import PATHWAYS, analyse, deeper, simulate_pathway
+from .pathways import PATHWAYS, analyse, cypher, deeper, graph as pathway_graph, simulate_pathway, what_if
 from .workspace import (LAYER_TYPES, code_workspace, compile_workspace, default_workspace, from_model,
                         from_pathway, new_layer, run_workspace, waveform)
 from .model import THERAPY, code_numpy, code_torch, graph, probe, reachability, simulate, therapy
@@ -441,6 +441,77 @@ def pathway_deeper(pid: str):
     if pid not in PATHWAYS:
         raise HTTPException(404, "No such pathway")
     return deeper(PATHWAYS[pid])
+
+
+@app.get("/api/pathways/{pid}/graph")
+def pathway_graph_api(pid: str):
+    if pid not in PATHWAYS:
+        raise HTTPException(404, "No such pathway")
+    return pathway_graph(PATHWAYS[pid])
+
+
+@app.get("/api/pathways/{pid}/cypher")
+def pathway_cypher(pid: str, download: bool = False):
+    if pid not in PATHWAYS:
+        raise HTTPException(404, "No such pathway")
+    text = cypher(PATHWAYS[pid])
+    if download:
+        return Response(text, media_type="text/plain",
+                        headers={"Content-Disposition": f'attachment; filename="fml-{pid}.cypher"'})
+    return {"cypher": text, "statements": len(text.splitlines())}
+
+
+@app.get("/api/pathways/{pid}/whatif")
+def pathway_whatif(pid: str, node: str):
+    if pid not in PATHWAYS:
+        raise HTTPException(404, "No such pathway")
+    out = what_if(PATHWAYS[pid], node)
+    if out is None:
+        raise HTTPException(404, "No such node in this pathway")
+    return out
+
+
+def _neo4j_settings():
+    return {"uri": os.environ.get("NEO4J_URI", ""), "user": os.environ.get("NEO4J_USER", "neo4j"),
+            "password": os.environ.get("NEO4J_PASSWORD", ""), "database": os.environ.get("NEO4J_DATABASE", "neo4j")}
+
+
+@app.get("/api/neo4j/status")
+def neo4j_status():
+    cfg = _neo4j_settings()
+    try:
+        import neo4j  # noqa: F401
+        driver_installed = True
+    except ImportError:
+        driver_installed = False
+    return {"driver_installed": driver_installed, "configured": bool(cfg["uri"] and cfg["password"]),
+            "uri": cfg["uri"], "database": cfg["database"]}
+
+
+@app.post("/api/neo4j/push")
+def neo4j_push(body: dict):
+    cfg = _neo4j_settings()
+    try:
+        from neo4j import GraphDatabase
+    except ImportError:
+        raise HTTPException(409, "The neo4j driver is not installed. Run: .venv/bin/pip install neo4j")
+    if not cfg["uri"] or not cfg["password"]:
+        raise HTTPException(409, "Set NEO4J_URI and NEO4J_PASSWORD (and NEO4J_USER if it is not neo4j) before pushing.")
+    pids = [body.get("pathway")] if body.get("pathway") in PATHWAYS else list(PATHWAYS)
+    done = {}
+    try:
+        with GraphDatabase.driver(cfg["uri"], auth=(cfg["user"], cfg["password"])) as driver:
+            with driver.session(database=cfg["database"]) as session:
+                for pid in pids:
+                    stmts = [x for x in cypher(PATHWAYS[pid]).split(";\n") if x.strip() and not x.strip().startswith("//")]
+                    for st in stmts:
+                        session.run(st.rstrip(";"))
+                    done[pid] = len(stmts)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"Neo4j rejected the load: {e}")
+    return {"pushed": done, "uri": cfg["uri"], "database": cfg["database"]}
 
 
 @app.get("/api/pathways/{pid}/simulate")

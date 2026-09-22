@@ -14,9 +14,10 @@ def _p(pid, name, description, species, clamped, reactions, reference):
                      "clamped": clamped, "reactions": reactions, "reference": reference}
 
 
-def R(rid, name, enzyme, subs, prods, kcat=1.0, km=0.5, reversible=False, regulators=()):
+def R(rid, name, enzyme, subs, prods, kcat=1.0, km=0.5, reversible=False, regulators=(), deficiency=None, drugs=()):
     return {"id": rid, "name": name, "enzyme": enzyme, "substrates": subs, "products": prods,
-            "kcat": kcat, "km": km, "reversible": reversible, "regulators": list(regulators)}
+            "kcat": kcat, "km": km, "reversible": reversible, "regulators": list(regulators),
+            "deficiency": deficiency, "drugs": list(drugs)}
 
 
 _p("glycolysis", "Glycolysis (Embden-Meyerhof-Parnas)",
@@ -93,6 +94,85 @@ _p("tca", "Citric acid cycle (TCA)",
     R("etc", "NADH reoxidation (electron transport chain)", "ETC", {"NADH": 1}, {"NAD": 1}, kcat=2.0, km=0.3),
     R("gtp_use", "GTP consumption", "GTP-use", {"GTP": 1}, {"GDP": 1}, kcat=1.5, km=0.3)],
    "Berg, Tymoczko and Stryer, citric acid cycle chapter")
+
+
+_p("urea", "Urea cycle",
+   "How the body turns toxic ammonia into urea for excretion. Every step has a known inherited deficiency, and "
+   "blocking any of them backs ammonia up into the blood.",
+   ["NH3", "CO2", "CP", "Orn", "Cit", "Asp", "ASA", "Arg", "Urea", "Fum"], ["CO2", "Asp"],
+   [R("nh3_in", "Ammonia from protein turnover", "Supply", {}, {"NH3": 1}, kcat=0.3),
+    R("cps1", "Carbamoyl phosphate synthetase I", "CPS1", {"NH3": 1, "CO2": 1}, {"CP": 1}, kcat=0.6, km=0.4,
+      deficiency="CPS1 deficiency: ammonia builds up from birth, the most severe urea cycle disorder"),
+    R("otc", "Ornithine transcarbamylase", "OTC", {"CP": 1, "Orn": 1}, {"Cit": 1}, kcat=1.5, km=0.3,
+      deficiency="OTC deficiency: the commonest urea cycle disorder, X-linked; carbamoyl phosphate spills into orotic acid"),
+    R("ass", "Argininosuccinate synthetase", "ASS", {"Cit": 1, "Asp": 1}, {"ASA": 1}, kcat=1.2, km=0.3,
+      deficiency="Citrullinemia type I: citrulline accumulates"),
+    R("asl", "Argininosuccinate lyase", "ASL", {"ASA": 1}, {"Arg": 1, "Fum": 1}, kcat=1.5, km=0.3,
+      deficiency="Argininosuccinic aciduria: argininosuccinate accumulates"),
+    R("arg1", "Arginase 1", "ARG1", {"Arg": 1}, {"Urea": 1, "Orn": 1}, kcat=1.5, km=0.3,
+      deficiency="Argininemia: arginine accumulates, with spastic diplegia rather than acute ammonia crises"),
+    R("urea_out", "Urea excretion", "Excretion", {"Urea": 1}, {}, kcat=2.0, km=0.4),
+    R("fum_out", "Fumarate to the TCA cycle", "Transfer", {"Fum": 1}, {}, kcat=2.0, km=0.4)],
+   "Standard urea cycle; deficiencies as described in clinical genetics texts")
+
+_p("phe", "Phenylalanine and tyrosine catabolism",
+   "The route that breaks down phenylalanine. Blocks along it cause several of the best known inherited metabolic "
+   "diseases, and one of them is treated with a drug that deliberately blocks a step further down.",
+   ["Phe", "Tyr", "HPP", "HGA", "MAA", "Fum", "AcAc"], [],
+   [R("phe_in", "Dietary phenylalanine", "Diet", {}, {"Phe": 1}, kcat=0.5),
+    R("pah", "Phenylalanine hydroxylase", "PAH", {"Phe": 1}, {"Tyr": 1}, kcat=1.2, km=0.4,
+      deficiency="Phenylketonuria (PKU): phenylalanine accumulates and harms the developing brain; treated by dietary restriction",
+      drugs=[{"name": "Sapropterin (BH4)", "effect": "activates", "note": "cofactor analogue that boosts residual enzyme in some patients"}]),
+    R("tat", "Tyrosine aminotransferase", "TAT", {"Tyr": 1}, {"HPP": 1}, kcat=1.5, km=0.4,
+      deficiency="Tyrosinemia type II: tyrosine accumulates, with eye and skin lesions"),
+    R("hpd", "4-hydroxyphenylpyruvate dioxygenase", "HPD", {"HPP": 1}, {"HGA": 1}, kcat=1.5, km=0.4,
+      deficiency="Tyrosinemia type III",
+      drugs=[{"name": "Nitisinone", "effect": "inhibits", "note": "blocks this step on purpose to stop toxic metabolites forming further down in tyrosinemia type I"}]),
+    R("hgd", "Homogentisate 1,2-dioxygenase", "HGD", {"HGA": 1}, {"MAA": 1}, kcat=1.5, km=0.4,
+      deficiency="Alkaptonuria: homogentisic acid accumulates, darkens urine and damages cartilage"),
+    R("fah", "Fumarylacetoacetate hydrolase", "FAH", {"MAA": 1}, {"Fum": 1, "AcAc": 1}, kcat=1.5, km=0.4,
+      deficiency="Tyrosinemia type I: toxic intermediates build up and damage liver and kidney"),
+    R("fum_out", "Fumarate to the TCA cycle", "Transfer", {"Fum": 1}, {}, kcat=2.0, km=0.4),
+    R("acac_out", "Acetoacetate to ketone metabolism", "Transfer", {"AcAc": 1}, {}, kcat=2.0, km=0.4)],
+   "Phenylalanine to fumarate and acetoacetate; diseases as in clinical genetics texts")
+
+_p("galactose", "Galactose metabolism (Leloir pathway)",
+   "How milk sugar enters glycolysis. A block at the second step is classic galactosemia, where galactose-1-phosphate "
+   "accumulates inside cells.",
+   ["Gal", "Gal1P", "UDPGlc", "UDPGal", "G1P", "G6P", "ATP", "ADP"], ["ATP", "ADP"],
+   [R("gal_in", "Dietary galactose (lactose)", "Diet", {}, {"Gal": 1}, kcat=0.3),
+    R("galk", "Galactokinase", "GALK", {"Gal": 1, "ATP": 1}, {"Gal1P": 1, "ADP": 1}, kcat=0.6, km=0.3,
+      deficiency="Galactokinase deficiency: galactose accumulates and forms cataracts, but without the systemic illness of classic galactosemia"),
+    R("galt", "Galactose-1-phosphate uridylyltransferase", "GALT", {"Gal1P": 1, "UDPGlc": 1}, {"G1P": 1, "UDPGal": 1},
+      kcat=1.5, km=0.3,
+      deficiency="Classic galactosemia: galactose-1-phosphate accumulates and is toxic to liver, brain and ovary"),
+    R("gale", "UDP-galactose 4-epimerase", "GALE", {"UDPGal": 1}, {"UDPGlc": 1}, kcat=2.0, km=0.4, reversible=True,
+      deficiency="Epimerase deficiency galactosemia, usually milder"),
+    R("pgm", "Phosphoglucomutase", "PGM", {"G1P": 1}, {"G6P": 1}, kcat=2.0, km=0.4, reversible=True),
+    R("g6p_out", "Glucose-6-phosphate into glycolysis", "Transfer", {"G6P": 1}, {}, kcat=1.5, km=0.4)],
+   "Leloir pathway; galactosemias as in clinical genetics texts")
+
+_p("purine", "Purine salvage and degradation",
+   "Recycling purines instead of making them from scratch, and the breakdown route that ends in uric acid. It holds "
+   "two famous enzyme deficiencies and the target of the commonest gout drug.",
+   ["PRPP", "Hx", "IMP", "Xan", "Urate", "Ado", "Ino"], ["PRPP", "Ado"],
+   [R("hgprt", "Hypoxanthine-guanine phosphoribosyltransferase", "HGPRT", {"Hx": 1, "PRPP": 1}, {"IMP": 1},
+      kcat=1.5, km=0.3,
+      deficiency="Lesch-Nyhan syndrome when complete: salvage fails, purines are shunted to uric acid, causing gout and severe neurological disease"),
+    R("ada", "Adenosine deaminase", "ADA", {"Ado": 1}, {"Ino": 1}, kcat=1.5, km=0.3,
+      deficiency="ADA deficiency: a form of severe combined immunodeficiency; toxic metabolites kill developing lymphocytes",
+      drugs=[{"name": "Pentostatin", "effect": "inhibits", "note": "used in hairy cell leukaemia, exploiting the same lymphocyte toxicity"}]),
+    R("pnp", "Purine nucleoside phosphorylase", "PNP", {"Ino": 1}, {"Hx": 1}, kcat=2.0, km=0.3,
+      deficiency="PNP deficiency: T-cell immunodeficiency"),
+    R("xo1", "Xanthine oxidase, first step", "XO", {"Hx": 1}, {"Xan": 1}, kcat=1.0, km=0.4,
+      drugs=[{"name": "Allopurinol", "effect": "inhibits", "note": "the standard gout drug, lowering uric acid production"},
+             {"name": "Febuxostat", "effect": "inhibits", "note": "a selective alternative"}]),
+    R("xo2", "Xanthine oxidase, second step", "XO", {"Xan": 1}, {"Urate": 1}, kcat=1.0, km=0.4,
+      drugs=[{"name": "Allopurinol", "effect": "inhibits", "note": "same enzyme, same block"}]),
+    R("imp_use", "IMP into nucleotide synthesis", "Transfer", {"IMP": 1}, {}, kcat=1.5, km=0.4),
+    R("urate_out", "Uric acid excretion", "Excretion", {"Urate": 1}, {}, kcat=1.0, km=0.5,
+      drugs=[{"name": "Probenecid", "effect": "activates", "note": "increases urinary excretion of uric acid"}])],
+   "Purine salvage and degradation; diseases and drugs as in clinical pharmacology texts")
 
 
 def _complex_key(d):
@@ -271,7 +351,8 @@ def analyse(path):
         notes.append(f"{len(laws)} conserved pool(s), quantities the reactions move around but never create or destroy: {pools}.")
     return {"species": path["species"], "reactions": [{"id": r["id"], "name": r["name"], "enzyme": r["enzyme"],
                                                        "substrates": r["substrates"], "products": r["products"],
-                                                       "reversible": r["reversible"], "regulators": r["regulators"]}
+                                                       "reversible": r["reversible"], "regulators": r["regulators"],
+                                                       "deficiency": r.get("deficiency"), "drugs": r.get("drugs", [])}
                                                       for r in path["reactions"]],
             "stoichiometry": N.astype(int).tolist(), "conservation": laws, "structure": d, "signs": sc,
             "notes": notes, "clamped": path["clamped"], "name": path["name"], "description": path["description"],
@@ -304,7 +385,8 @@ def initial_state(path, level=1.0):
     c = {s: 0.05 for s in path["species"]}
     for s in path["clamped"]:
         c[s] = level
-    for s in ("ATP", "NAD", "NADP", "CoA", "OAA", "GDP", "Pi", "Glc", "AcCoA", "G6P", "Pyr"):
+    for s in ("ATP", "NAD", "NADP", "CoA", "OAA", "GDP", "Pi", "Glc", "AcCoA", "G6P", "Pyr", "Orn", "UDPGlc",
+              "PRPP", "Asp", "Ado", "Hx", "Phe", "Gal", "NH3", "CO2"):
         if s in c:
             c[s] = max(c[s], 0.6)
     for s in ("ADP", "AMP", "NADH", "NADPH", "GTP"):
@@ -460,3 +542,118 @@ def deeper(path):
                      "worth inhibiting, and the ones near zero are the ones a drug would barely move. These are "
                      "measured here, and depend on the illustrative rate constants.")
     return {"backbone": bb, "acr": acr, "steady_states": ss, "control": cc, "notes": notes}
+
+
+def graph(path):
+    """Bipartite graph of species and reactions, ready for drawing or for loading into a graph database."""
+    nodes = [{"id": f"s:{s}", "kind": "species", "label": s, "clamped": s in path["clamped"]} for s in path["species"]]
+    nodes += [{"id": f"r:{r['id']}", "kind": "reaction", "label": r["enzyme"], "name": r["name"],
+               "deficiency": r.get("deficiency"), "drugs": r.get("drugs", []), "reversible": r["reversible"]}
+              for r in path["reactions"]]
+    edges = []
+    for r in path["reactions"]:
+        for sp, k in r["substrates"].items():
+            edges.append({"from": f"s:{sp}", "to": f"r:{r['id']}", "type": "SUBSTRATE_OF", "stoich": k})
+        for sp, k in r["products"].items():
+            edges.append({"from": f"r:{r['id']}", "to": f"s:{sp}", "type": "PRODUCT_OF", "stoich": k})
+        for g in r["regulators"]:
+            edges.append({"from": f"s:{g['species']}", "to": f"r:{r['id']}", "type": "REGULATES", "effect": g["effect"]})
+    return {"id": path["id"], "name": path["name"], "nodes": nodes, "edges": edges}
+
+
+def _cy(v):
+    if v is None:
+        return "null"
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return repr(v)
+    return "'" + str(v).replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def cypher(path):
+    """Cypher statements that build this pathway in a graph database such as Neo4j."""
+    L = [f"// {path['name']} — generated by Fate Memory Lab",
+         f"MERGE (p:Pathway {{id: {_cy(path['id'])}}}) SET p.name = {_cy(path['name'])}, "
+         f"p.description = {_cy(path['description'])}, p.reference = {_cy(path['reference'])};"]
+    for sp in path["species"]:
+        L.append(f"MERGE (m:Metabolite {{name: {_cy(sp)}, pathway: {_cy(path['id'])}}}) "
+                 f"SET m.held_fixed = {_cy(sp in path['clamped'])} "
+                 f"WITH m MATCH (p:Pathway {{id: {_cy(path['id'])}}}) MERGE (m)-[:IN_PATHWAY]->(p);")
+    for r in path["reactions"]:
+        L.append(f"MERGE (x:Reaction {{id: {_cy(r['id'])}, pathway: {_cy(path['id'])}}}) "
+                 f"SET x.name = {_cy(r['name'])}, x.enzyme = {_cy(r['enzyme'])}, x.kcat = {_cy(r['kcat'])}, "
+                 f"x.km = {_cy(r['km'])}, x.reversible = {_cy(r['reversible'])}, x.deficiency = {_cy(r.get('deficiency'))} "
+                 f"WITH x MATCH (p:Pathway {{id: {_cy(path['id'])}}}) MERGE (x)-[:IN_PATHWAY]->(p);")
+        L.append(f"MERGE (e:Enzyme {{name: {_cy(r['enzyme'])}}}) WITH e "
+                 f"MATCH (x:Reaction {{id: {_cy(r['id'])}, pathway: {_cy(path['id'])}}}) MERGE (e)-[:CATALYSES]->(x);")
+        for sp, k in r["substrates"].items():
+            L.append(f"MATCH (m:Metabolite {{name: {_cy(sp)}, pathway: {_cy(path['id'])}}}), "
+                     f"(x:Reaction {{id: {_cy(r['id'])}, pathway: {_cy(path['id'])}}}) "
+                     f"MERGE (m)-[:SUBSTRATE_OF {{stoichiometry: {_cy(k)}}}]->(x);")
+        for sp, k in r["products"].items():
+            L.append(f"MATCH (x:Reaction {{id: {_cy(r['id'])}, pathway: {_cy(path['id'])}}}), "
+                     f"(m:Metabolite {{name: {_cy(sp)}, pathway: {_cy(path['id'])}}}) "
+                     f"MERGE (x)-[:PRODUCES {{stoichiometry: {_cy(k)}}}]->(m);")
+        for g in r["regulators"]:
+            L.append(f"MATCH (m:Metabolite {{name: {_cy(g['species'])}, pathway: {_cy(path['id'])}}}), "
+                     f"(x:Reaction {{id: {_cy(r['id'])}, pathway: {_cy(path['id'])}}}) "
+                     f"MERGE (m)-[:REGULATES {{effect: {_cy(g['effect'])}, constant: {_cy(g['k'])}}}]->(x);")
+        for d in r.get("drugs", []):
+            L.append(f"MERGE (d:Drug {{name: {_cy(d['name'])}}}) WITH d "
+                     f"MATCH (x:Reaction {{id: {_cy(r['id'])}, pathway: {_cy(path['id'])}}}) "
+                     f"MERGE (d)-[:ACTS_ON {{effect: {_cy(d['effect'])}, note: {_cy(d.get('note'))}}}]->(x);")
+        if r.get("deficiency"):
+            L.append(f"MERGE (c:Condition {{name: {_cy(r['deficiency'].split(':')[0])}}}) "
+                     f"SET c.description = {_cy(r['deficiency'])} WITH c "
+                     f"MATCH (e:Enzyme {{name: {_cy(r['enzyme'])}}}) MERGE (c)-[:CAUSED_BY_LOSS_OF]->(e);")
+    return "\n".join(L)
+
+
+def what_if(path, node_id, levels=(0.5, 0.2, 0.0), steps=3000, boost=3.0, tol=0.05):
+    """What happens if one thing changes: an enzyme loses activity, or a metabolite is supplied in excess."""
+    sp = path["species"]
+    base = simulate_pathway(path, steps=steps, record=False)
+    kind, key = node_id.split(":", 1)
+    out = {"node": node_id, "kind": kind, "label": key, "baseline_flux": base["flux"], "cases": []}
+    if kind == "r":
+        r = next((x for x in path["reactions"] if x["id"] == key), None)
+        if r is None:
+            return None
+        out["label"] = r["enzyme"]
+        out["name"] = r["name"]
+        out["deficiency"] = r.get("deficiency")
+        out["drugs"] = r.get("drugs", [])
+        for lv in levels:
+            scale = [lv if x["id"] == key else 1.0 for x in path["reactions"]]
+            run = simulate_pathway(path, steps=steps, enzyme_scale=scale, record=False)
+            out["cases"].append(_compare(sp, base, run, f"{int(lv * 100)}% activity", tol))
+    else:
+        if key not in sp:
+            return None
+        out["name"] = key
+        for f in (boost, 1 / boost):
+            c0 = initial_state(path)
+            c0[key] = c0[key] * f
+            held = dict(path)
+            held["clamped"] = sorted(set(path["clamped"]) | {key})
+            run = simulate_pathway(held, steps=steps, c0=c0, record=False)
+            out["cases"].append(_compare(sp, base, run, f"{key} held {'high' if f > 1 else 'low'} ({round(f, 2)}x)", tol))
+    return out
+
+
+def _compare(sp, base, run, label, tol):
+    changes = []
+    for i, s in enumerate(sp):
+        b, k = base["final"][i], run["final"][i]
+        if abs(k - b) > tol and max(b, k) > 1e-3:
+            changes.append({"species": s, "before": round(float(b), 3), "after": round(float(k), 3),
+                            "fold": round(float((k + 1e-6) / (b + 1e-6)), 2)})
+    changes.sort(key=lambda d: -abs(np.log(max(d["fold"], 1e-6))))
+    fl = []
+    for rid, b in base["flux"].items():
+        k = run["flux"][rid]
+        if abs(k - b) > 0.02:
+            fl.append({"reaction": rid, "before": round(float(b), 3), "after": round(float(k), 3)})
+    fl.sort(key=lambda d: -abs(d["after"] - d["before"]))
+    return {"label": label, "changes": changes[:8], "fluxes": fl[:6], "settled": run["steady"]}

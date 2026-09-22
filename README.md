@@ -99,8 +99,10 @@ you run it.
 
 ## Pathways
 
-Four pathways ship with the app: glycolysis, lactate fermentation, the oxidative pentose phosphate pathway, and the
-citric acid cycle. Stoichiometry follows standard textbook reactions, including the classic allosteric controls such
+Eight pathways ship with the app: glycolysis, lactate fermentation, the oxidative pentose phosphate pathway, the
+citric acid cycle, the urea cycle, phenylalanine and tyrosine catabolism, galactose metabolism (Leloir), and purine
+salvage and degradation. The last four carry clinical annotations: the inherited deficiency of each enzyme and the
+drugs that act on it. Stoichiometry follows standard textbook reactions, including the classic allosteric controls such
 as ATP inhibiting phosphofructokinase. **Rate constants are illustrative, not fitted to measurements.** Structural
 results are therefore exact and transferable; specific concentrations and timings are not.
 
@@ -122,11 +124,44 @@ For each pathway the app reports:
     same conserved pools**, so a difference means genuine multistability rather than a different amount of material.
   - *Flux control coefficients*: how much the output flux moves when each enzyme is nudged up and down. This is the
     measured drug-target ranking, and the coefficients should sum to about 1, which is a useful check on the numerics.
+- **The network**, drawn as a graph: metabolites as circles, enzyme steps as squares, with regulation as dashed
+  arrows, green for activation and red for inhibition. Steps with a known inherited deficiency are filled; steps with
+  a drug acting on them are outlined in red. Drag nodes to rearrange.
+- **What happens if this changes**, for any node you click:
+  - An enzyme: the pathway is re-simulated at 50%, 20% and 0% of its activity, and the metabolites that rise or fall
+    are listed with the fold change, alongside the named deficiency and any drugs that act there.
+  - A metabolite: it is held three times higher and three times lower, and the knock-on effects are listed.
+- **Graph database export**: every pathway converts to Cypher that builds it in Neo4j as Pathway, Metabolite,
+  Reaction, Enzyme, Drug and Condition nodes, with SUBSTRATE_OF, PRODUCES, REGULATES, CATALYSES, ACTS_ON and
+  CAUSED_BY_LOSS_OF relationships. Download the file, or push straight into a running database.
 - **Time courses**, with a one-click **knockdown** of any enzyme to 20% of its activity, the in-model equivalent of an
   inhibitor drug.
 
 This is where the bench's question meets real biochemistry: the arms compare wiring rules on invented tasks, and the
 pathway analyser reports which of those rules real metabolic networks actually satisfy.
+
+## Neo4j
+
+Any pathway exports as Cypher with no setup: use **Download Cypher** and paste the file into Neo4j Browser or run it
+with cypher-shell. To push directly from the app, install the driver and point it at your database:
+
+```bash
+cd ~/Sites/fate-memory-lab
+.venv/bin/pip install neo4j
+```
+
+Then set these before starting the service:
+
+| Variable | Meaning |
+|---|---|
+| `NEO4J_URI` | `neo4j+s://xxxx.databases.neo4j.io` for Aura, or `bolt://localhost:7687` locally |
+| `NEO4J_USER` | Defaults to `neo4j` |
+| `NEO4J_PASSWORD` | Your database password |
+| `NEO4J_DATABASE` | Defaults to `neo4j` |
+
+The Push to Neo4j button then loads the open pathway, and the app says which piece is missing if it cannot. Once
+loaded, questions like "which conditions come from enzymes that handle this metabolite" or "which drugs act two steps
+upstream of uric acid" become single Cypher queries across all eight pathways at once.
 
 ## Quick start
 

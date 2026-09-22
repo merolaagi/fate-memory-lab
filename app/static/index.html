@@ -767,6 +767,12 @@ async function openPathway(pid){
         <td style="text-align:left">${r.regulators.map(g=>`${esc(g.species)} ${g.effect}s`).join(", ")||"—"}</td>
         <td><button class="btn ghost kd" data-r="${r.id}">to 20%</button></td></tr>`).join("")}
     </tbody></table></div>
+    <h3 class="sub">Network</h3>
+    <p class="note">Circles are metabolites, squares are enzyme steps. Drag to rearrange; click any node to see what happens if it changes: an enzyme losing activity, or a metabolite held high or low. Known inherited deficiencies and the drugs that act on each step are marked.</p>
+    <div class="modelhead"><a class="btn ghost" href="/api/pathways/${pid}/cypher?download=true">Download Cypher</a>
+      <button class="btn ghost" id="pwpush">Push to Neo4j</button><span class="note" id="pwneo"></span></div>
+    <div class="canvaswrap"><svg class="netcanvas" viewBox="0 0 980 520" role="img" aria-label="Pathway network"></svg></div>
+    <div id="whatif"><p class="note">Click a node above.</p></div>
     <h3 class="sub">Deeper structure</h3>
     <p class="note">Four further questions, answered by measurement rather than assumption: is the backbone monotone once regulation is stripped out; does any species hold its level when the pools are scaled (concentration robustness); does the pathway have more than one steady state; and which enzyme actually controls the output flux.</p>
     <button class="btn ghost" id="pwdeep">Analyse</button><div id="pwdeepbody"></div>
@@ -775,7 +781,78 @@ async function openPathway(pid){
   document.querySelectorAll(".kd").forEach(b=>b.onclick=()=>runPathway(pid,b.dataset.r));
   $("#pwrun").onclick=()=>runPathway(pid,null);
   $("#pwdeep").onclick=()=>runDeeper(pid);
+  drawNetwork(pid); neoStatus(pid);
   runPathway(pid,null);
+}
+async function neoStatus(pid){
+  const el=$("#pwneo"), btn=$("#pwpush"); if(!el) return;
+  try{const st=await api("/api/neo4j/status");
+    el.textContent=!st.driver_installed?"Neo4j driver not installed: run .venv/bin/pip install neo4j":
+      !st.configured?"Set NEO4J_URI and NEO4J_PASSWORD to push straight into your database.":`Ready: ${st.uri}, database ${st.database}.`;
+    btn.disabled=!(st.driver_installed&&st.configured);
+  }catch(e){el.textContent=""}
+  btn.onclick=async()=>{btn.disabled=true;el.textContent="Pushing…";
+    try{const r=await api("/api/neo4j/push",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pathway:pid})});
+      el.textContent=`Loaded ${Object.entries(r.pushed).map(([k,v])=>`${k} (${v} statements)`).join(", ")} into ${r.uri}.`;
+    }catch(e){el.textContent="Push failed: "+e.message}
+    btn.disabled=false};
+}
+async function drawNetwork(pid){
+  const g=await api(`/api/pathways/${pid}/graph`), svg=document.querySelector(".netcanvas");
+  const W=980,H=520,N=g.nodes,E=g.edges;
+  const idx={};N.forEach((n,i)=>{idx[n.id]=i});
+  const pos=N.map((n,i)=>({x:W/2+260*Math.cos(2*Math.PI*i/N.length),y:H/2+200*Math.sin(2*Math.PI*i/N.length)}));
+  const links=E.map(e=>[idx[e.from],idx[e.to]]);
+  for(let step=0;step<260;step++){
+    const fx=pos.map(()=>0),fy=pos.map(()=>0);
+    for(let i=0;i<N.length;i++)for(let j=i+1;j<N.length;j++){
+      let dx=pos[i].x-pos[j].x,dy=pos[i].y-pos[j].y,d2=dx*dx+dy*dy+0.01,f=9000/d2;
+      const d=Math.sqrt(d2);fx[i]+=f*dx/d;fy[i]+=f*dy/d;fx[j]-=f*dx/d;fy[j]-=f*dy/d}
+    for(const [a,b] of links){
+      let dx=pos[b].x-pos[a].x,dy=pos[b].y-pos[a].y,d=Math.hypot(dx,dy)||1,f=(d-90)*0.05;
+      fx[a]+=f*dx/d;fy[a]+=f*dy/d;fx[b]-=f*dx/d;fy[b]-=f*dy/d}
+    for(let i=0;i<N.length;i++){
+      pos[i].x=Math.max(40,Math.min(W-40,pos[i].x+Math.max(-12,Math.min(12,fx[i]))+(W/2-pos[i].x)*0.002));
+      pos[i].y=Math.max(30,Math.min(H-30,pos[i].y+Math.max(-12,Math.min(12,fy[i]))+(H/2-pos[i].y)*0.002));}
+  }
+  NET={pid,g,pos,sel:null};
+  paintNetwork();
+}
+let NET=null;
+function paintNetwork(){
+  const {g,pos,sel}=NET, svg=document.querySelector(".netcanvas");
+  let out=`<defs><marker id="na" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="var(--muted)"/></marker></defs>`;
+  const idx={};g.nodes.forEach((n,i)=>{idx[n.id]=i});
+  for(const e of g.edges){const a=pos[idx[e.from]],b=pos[idx[e.to]];
+    const reg=e.type==="REGULATES";
+    out+=`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="${reg?(e.effect==="inhibit"?"var(--broken)":"var(--coop)"):"var(--muted)"}" stroke-opacity="${reg?0.9:0.5}" stroke-width="${reg?1.4:1.2}" ${reg?'stroke-dasharray="4 3"':""} marker-end="url(#na)"><title>${esc(e.type.toLowerCase().replace("_"," "))}${e.effect?": "+esc(e.effect):""}</title></line>`}
+  g.nodes.forEach((n,i)=>{const p=pos[i],on=sel===n.id;
+    if(n.kind==="species") out+=`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${on?16:13}" fill="${n.clamped?"var(--well)":"var(--contract)"}" fill-opacity="${n.clamped?1:.85}" stroke="var(--ink)" stroke-width="${on?2.5:1}" class="nnode" data-id="${n.id}"/>`;
+    else out+=`<rect x="${(p.x-16).toFixed(1)}" y="${(p.y-12).toFixed(1)}" width="32" height="24" rx="5" fill="${n.deficiency?"var(--free)":"var(--surface)"}" stroke="${n.drugs&&n.drugs.length?"var(--broken)":"var(--ink)"}" stroke-width="${on?2.5:(n.drugs&&n.drugs.length?2:1)}" class="nnode" data-id="${n.id}"/>`;
+    out+=`<text x="${p.x.toFixed(1)}" y="${(p.y+(n.kind==="species"?26:30)).toFixed(1)}" font-size="10" text-anchor="middle" fill="var(--ink)" pointer-events="none">${esc(n.label)}</text>`});
+  svg.innerHTML=out;
+  svg.querySelectorAll(".nnode").forEach(el=>{
+    el.style.cursor="pointer";
+    el.onclick=()=>{NET.sel=el.dataset.id;paintNetwork();whatIf(el.dataset.id)};
+    el.onpointerdown=ev=>{const i=idx[el.dataset.id],pt=svg.createSVGPoint(),m=svg.getScreenCTM().inverse();
+      el.setPointerCapture(ev.pointerId);
+      svg.onpointermove=mv=>{pt.x=mv.clientX;pt.y=mv.clientY;const q=pt.matrixTransform(m);pos[i].x=q.x;pos[i].y=q.y;paintNetwork()};
+      svg.onpointerup=()=>{svg.onpointermove=null}};
+  });
+}
+async function whatIf(node){
+  const box=$("#whatif"); box.innerHTML=`<p class="note">Working out what changes…</p>`;
+  let d;try{d=await api(`/api/pathways/${NET.pid}/whatif?node=${encodeURIComponent(node)}`)}catch(e){box.innerHTML=`<p class="err">${esc(e.message)}</p>`;return}
+  let h=`<h3 class="sub" style="margin-top:14px">${esc(d.name||d.label)}</h3>`;
+  if(d.deficiency) h+=`<p><b>If this enzyme is missing:</b> ${esc(d.deficiency)}.</p>`;
+  if(d.drugs&&d.drugs.length) h+=`<p><b>Drugs acting here:</b> ${d.drugs.map(x=>`${esc(x.name)} (${esc(x.effect)}${x.note?", "+esc(x.note):""})`).join("; ")}.</p>`;
+  h+=d.cases.map(c=>`<h4 style="margin:12px 0 4px">${esc(c.label)}</h4>`+
+    (c.changes.length?`<div class="tablewrap"><table><thead><tr><th>Metabolite</th><th>Before</th><th>After</th><th>Change</th></tr></thead><tbody>`+
+      c.changes.map(x=>`<tr><td>${esc(x.species)}</td><td>${x.before}</td><td>${x.after}</td><td>${x.after<1e-3?"to zero":x.before<1e-3?"from zero":x.fold>=1?x.fold.toFixed(2)+"x up":(1/x.fold).toFixed(2)+"x down"}</td></tr>`).join("")+
+      `</tbody></table></div>`:`<p class="note">Nothing moved measurably.</p>`)+
+    (c.fluxes.length?`<p class="note">Fluxes that shifted: ${c.fluxes.map(f=>`${esc(f.reaction)} ${f.before} → ${f.after}`).join(", ")}.</p>`:"")+
+    (c.settled?"":`<p class="note">This case had not settled by the end of the run: something is still building up.</p>`)).join("");
+  box.innerHTML=h;
 }
 async function runDeeper(pid){
   const box=$("#pwdeepbody"); box.innerHTML=`<p class="note">Measuring: this runs the pathway many times and takes a few seconds…</p>`;

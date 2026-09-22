@@ -221,3 +221,37 @@ def test_pathway_deeper_analysis():
     assert d["notes"] and d["control"]["coefficients"]
     assert abs(d["control"]["sum"]) > 0.2
     assert set(d["acr"]) == {"robust", "sensitive", "factors"}
+
+
+def test_pathway_graph_cypher_and_whatif():
+    from app.pathways import PATHWAYS, cypher, graph, what_if
+
+    assert len(PATHWAYS) == 8
+    for pid, p in PATHWAYS.items():
+        g = graph(p)
+        assert len(g["nodes"]) == len(p["species"]) + len(p["reactions"])
+        assert all(e["from"].startswith(("s:", "r:")) for e in g["edges"])
+        c = cypher(p)
+        assert "MERGE (p:Pathway" in c and c.count(";") >= len(p["reactions"])
+    w = what_if(PATHWAYS["purine"], "r:xo1")
+    urate = {c["label"]: {x["species"]: x["after"] for x in c["changes"]} for c in w["cases"]}
+    assert any(d["name"] == "Allopurinol" for d in w["drugs"])
+    assert urate["0% activity"]["Urate"] < urate["50% activity"]["Urate"]
+    ko = what_if(PATHWAYS["phe"], "r:pah")["cases"][-1]
+    phe = next(x for x in ko["changes"] if x["species"] == "Phe")
+    assert phe["after"] > phe["before"] * 10
+    assert what_if(PATHWAYS["galactose"], "s:Gal")["cases"]
+    assert what_if(PATHWAYS["urea"], "r:nope") is None
+
+
+def test_neo4j_status_endpoint(tmp_path, monkeypatch):
+    monkeypatch.setenv("FML_DATA", str(tmp_path / "r"))
+    monkeypatch.setenv("FML_WORKSPACES", str(tmp_path / "w"))
+    import importlib
+    import app.server as server
+    importlib.reload(server)
+    with TestClient(server.app) as client:
+        st = client.get("/api/neo4j/status").json()
+        assert set(st) >= {"driver_installed", "configured"}
+        assert client.get("/api/pathways/purine/graph").json()["nodes"]
+        assert "MERGE" in client.get("/api/pathways/urea/cypher").json()["cypher"]

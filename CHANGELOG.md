@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.0
+- Four more pathways with clinical annotations: the urea cycle, phenylalanine and tyrosine catabolism, galactose metabolism, and purine salvage and degradation
+- Every enzyme step carries its known inherited deficiency and the drugs that act on it
+- Network view: metabolites and enzyme steps as a draggable graph, with regulation, deficiencies and drug targets marked
+- What happens if this changes: click an enzyme to re-simulate it at 50%, 20% and 0% activity, or a metabolite to hold it high or low, and see which metabolites move and by how much
+- Cypher export for every pathway, building Pathway, Metabolite, Reaction, Enzyme, Drug and Condition nodes with their relationships
+- Optional direct push into Neo4j with the neo4j driver and NEO4J_URI / NEO4J_PASSWORD
+
 ## 0.9.0
 - Two new arms drawn from what real pathways actually satisfy: monotone backbone (sign-consistent wiring plus a few negative feedback edges) and conserved pools (unit groups whose totals never change)
 - Both at matched parameter count, with the number of feedback edges and the pool size as settings
