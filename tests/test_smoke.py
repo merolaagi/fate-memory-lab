@@ -255,3 +255,31 @@ def test_neo4j_status_endpoint(tmp_path, monkeypatch):
         assert set(st) >= {"driver_installed", "configured"}
         assert client.get("/api/pathways/purine/graph").json()["nodes"]
         assert "MERGE" in client.get("/api/pathways/urea/cypher").json()["cypher"]
+
+
+def test_merged_metabolism_runs_and_links_pathways():
+    from app.pathways import analyse, merged, simulate_pathway, what_if
+
+    m = merged()
+    assert len(m["species"]) > 50 and len(m["reactions"]) > 50
+    run = simulate_pathway(m, steps=4000, record=False)
+    assert run["steady"] and max(run["final"]) < 20
+    a = analyse(m)
+    pools = {tuple(sorted(sp for sp, _ in law)) for law in a["conservation"]}
+    assert ("ADP", "ATP") in pools and ("NAD", "NADH") in pools
+    w = what_if(m, "r:phe_pah")
+    hit = w["cases"][-1]["pathways"]
+    assert "phe" in hit and len(hit) > 1
+
+
+def test_query_panel_is_read_only(tmp_path, monkeypatch):
+    monkeypatch.setenv("FML_DATA", str(tmp_path / "r"))
+    monkeypatch.setenv("FML_WORKSPACES", str(tmp_path / "w"))
+    import importlib
+    import app.server as server
+    importlib.reload(server)
+    with TestClient(server.app) as client:
+        assert client.post("/api/neo4j/query", json={"cypher": "MATCH (n) DETACH DELETE n"}).status_code == 400
+        assert client.post("/api/neo4j/query", json={"cypher": ""}).status_code == 400
+        assert client.get("/api/pathways").json()[-1]["id"] == "all"
+        assert "IS]->(c)" in client.get("/api/pathways/purine/cypher").json()["cypher"]

@@ -21,7 +21,8 @@ from typing import Literal
 
 from .engine import ARMS, DEFAULTS, MEMBRANES, TASKS, Cancelled, run_job
 from .explain import LABEL, explain
-from .pathways import PATHWAYS, analyse, cypher, deeper, graph as pathway_graph, simulate_pathway, what_if
+from .pathways import (PATHWAYS, analyse, cypher, deeper, graph as pathway_graph, merged, simulate_pathway,
+                        what_if)
 from .workspace import (LAYER_TYPES, code_workspace, compile_workspace, default_workspace, from_model,
                         from_pathway, new_layer, run_workspace, waveform)
 from .model import THERAPY, code_numpy, code_torch, graph, probe, reachability, simulate, therapy
@@ -423,38 +424,47 @@ class SimRequest(BaseModel):
     channels: list[Waveform] = Field(default_factory=list)
 
 
+_MERGED = {}
+
+
+def _path(pid):
+    if pid == "all":
+        if "m" not in _MERGED:
+            _MERGED["m"] = merged()
+        return _MERGED["m"]
+    if pid not in PATHWAYS:
+        raise HTTPException(404, "No such pathway")
+    return PATHWAYS[pid]
+
+
 @app.get("/api/pathways")
 def list_pathways():
-    return [{"id": p["id"], "name": p["name"], "description": p["description"], "species": len(p["species"]),
-             "reactions": len(p["reactions"])} for p in PATHWAYS.values()]
+    out = [{"id": p["id"], "name": p["name"], "description": p["description"], "species": len(p["species"]),
+            "reactions": len(p["reactions"])} for p in PATHWAYS.values()]
+    m = _path("all")
+    out.append({"id": "all", "name": m["name"], "description": m["description"], "species": len(m["species"]),
+                "reactions": len(m["reactions"])})
+    return out
 
 
 @app.get("/api/pathways/{pid}")
 def get_pathway(pid: str):
-    if pid not in PATHWAYS:
-        raise HTTPException(404, "No such pathway")
-    return analyse(PATHWAYS[pid])
+    return analyse(_path(pid))
 
 
 @app.get("/api/pathways/{pid}/deeper")
 def pathway_deeper(pid: str):
-    if pid not in PATHWAYS:
-        raise HTTPException(404, "No such pathway")
-    return deeper(PATHWAYS[pid])
+    return deeper(_path(pid))
 
 
 @app.get("/api/pathways/{pid}/graph")
 def pathway_graph_api(pid: str):
-    if pid not in PATHWAYS:
-        raise HTTPException(404, "No such pathway")
-    return pathway_graph(PATHWAYS[pid])
+    return pathway_graph(_path(pid))
 
 
 @app.get("/api/pathways/{pid}/cypher")
 def pathway_cypher(pid: str, download: bool = False):
-    if pid not in PATHWAYS:
-        raise HTTPException(404, "No such pathway")
-    text = cypher(PATHWAYS[pid])
+    text = cypher(_path(pid))
     if download:
         return Response(text, media_type="text/plain",
                         headers={"Content-Disposition": f'attachment; filename="fml-{pid}.cypher"'})
@@ -463,9 +473,7 @@ def pathway_cypher(pid: str, download: bool = False):
 
 @app.get("/api/pathways/{pid}/whatif")
 def pathway_whatif(pid: str, node: str):
-    if pid not in PATHWAYS:
-        raise HTTPException(404, "No such pathway")
-    out = what_if(PATHWAYS[pid], node)
+    out = what_if(_path(pid), node)
     if out is None:
         raise HTTPException(404, "No such node in this pathway")
     return out
@@ -516,9 +524,7 @@ def neo4j_push(body: dict):
 
 @app.get("/api/pathways/{pid}/simulate")
 def sim_pathway(pid: str, steps: int = 2500, knockdown: str | None = None, factor: float = 0.2):
-    if pid not in PATHWAYS:
-        raise HTTPException(404, "No such pathway")
-    p = PATHWAYS[pid]
+    p = _path(pid)
     scale = None
     if knockdown:
         scale = [factor if r["id"] == knockdown else 1.0 for r in p["reactions"]]
@@ -652,3 +658,31 @@ def workspace_code(wid: str, download: bool = False):
         return Response(code, media_type="text/x-python",
                         headers={"Content-Disposition": f'attachment; filename="fml-workspace-{wid}.py"'})
     return {"code": code}
+
+
+@app.post("/api/neo4j/query")
+def neo4j_query(body: dict):
+    cfg = _neo4j_settings()
+    q = (body.get("cypher") or "").strip()
+    if not q:
+        raise HTTPException(400, "Write a query first.")
+    banned = ("create ", "merge ", "delete ", "detach", "set ", "remove ", "drop ", "load csv", "call db.", "apoc.")
+    if any(b in q.lower() for b in banned):
+        raise HTTPException(400, "This panel runs read-only queries. Use Push to Neo4j to write.")
+    try:
+        from neo4j import GraphDatabase
+    except ImportError:
+        raise HTTPException(409, "The neo4j driver is not installed. Run: .venv/bin/pip install neo4j")
+    if not cfg["uri"] or not cfg["password"]:
+        raise HTTPException(409, "Set NEO4J_URI and NEO4J_PASSWORD before querying.")
+    try:
+        with GraphDatabase.driver(cfg["uri"], auth=(cfg["user"], cfg["password"])) as driver:
+            with driver.session(database=cfg["database"]) as session:
+                res = session.run(q)
+                rows = [dict(r) for _, r in zip(range(200), res)]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"Neo4j rejected the query: {e}")
+    cols = sorted({k for r in rows for k in r})
+    return {"columns": cols, "rows": [{k: str(r.get(k, "")) for k in cols} for r in rows], "count": len(rows)}

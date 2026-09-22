@@ -106,6 +106,12 @@ drugs that act on it. Stoichiometry follows standard textbook reactions, includi
 as ATP inhibiting phosphofructokinase. **Rate constants are illustrative, not fitted to measurements.** Structural
 results are therefore exact and transferable; specific concentrations and timings are not.
 
+A ninth entry, **Whole metabolism**, joins all eight into a single network through the metabolites they share, so a
+change in one pathway can be followed into the others. Reactions appearing in more than one pathway are kept once,
+and everything below works on the joined network too. There, a what-if also reports which source pathways felt the
+change: losing phenylalanine hydroxylase empties its own pathway and moves malate and oxaloacetate in the citric acid
+cycle, because that route feeds fumarate into it.
+
 For each pathway the app reports:
 
 - **Conserved pools** found exactly: quantities the reactions move around but never create or destroy, such as
@@ -162,6 +168,17 @@ Then set these before starting the service:
 The Push to Neo4j button then loads the open pathway, and the app says which piece is missing if it cannot. Once
 loaded, questions like "which conditions come from enzymes that handle this metabolite" or "which drugs act two steps
 upstream of uric acid" become single Cypher queries across all eight pathways at once.
+
+## Querying the graph
+
+With the driver installed and the database configured, **Query Neo4j** opens a read-only Cypher panel with starting
+queries built in: conditions and the enzymes that cause them, drugs and what they act on, metabolites shared by more
+than one pathway, everything within two steps of uric acid, and every step with a known deficiency. Writes are
+rejected in this panel; use Push to Neo4j to load data.
+
+Because every metabolite also links to a shared `Compound` node, queries cross pathway boundaries. That is the point
+of keeping a graph alongside the simulator: simulation answers "what happens if this enzyme fails", and the graph
+answers "which other diseases and drugs sit near this metabolite".
 
 ## Quick start
 

@@ -770,7 +770,13 @@ async function openPathway(pid){
     <h3 class="sub">Network</h3>
     <p class="note">Circles are metabolites, squares are enzyme steps. Drag to rearrange; click any node to see what happens if it changes: an enzyme losing activity, or a metabolite held high or low. Known inherited deficiencies and the drugs that act on each step are marked.</p>
     <div class="modelhead"><a class="btn ghost" href="/api/pathways/${pid}/cypher?download=true">Download Cypher</a>
-      <button class="btn ghost" id="pwpush">Push to Neo4j</button><span class="note" id="pwneo"></span></div>
+      <button class="btn ghost" id="pwpush">Push to Neo4j</button>
+      <button class="btn ghost" id="pwquery">Query Neo4j</button><span class="note" id="pwneo"></span></div>
+    <div id="pwquerybox" hidden>
+      <div class="fields"><label style="grid-column:1/-1">Cypher (read-only)<textarea id="cyq" rows="3" style="width:100%;border:1px solid var(--rule);border-radius:6px;background:var(--agar);color:var(--ink);padding:8px;font-family:ui-monospace,Menlo,monospace;font-size:.85rem"></textarea></label></div>
+      <div class="modelhead"><select id="cypreset"></select><button class="btn ghost" id="cyrun">Run query</button></div>
+      <div id="cyout"></div>
+    </div>
     <div class="canvaswrap"><svg class="netcanvas" viewBox="0 0 980 520" role="img" aria-label="Pathway network"></svg></div>
     <div id="whatif"><p class="note">Click a node above.</p></div>
     <h3 class="sub">Deeper structure</h3>
@@ -784,6 +790,13 @@ async function openPathway(pid){
   drawNetwork(pid); neoStatus(pid);
   runPathway(pid,null);
 }
+const CYPHER_PRESETS=[
+  ["Conditions and the enzymes that cause them","MATCH (c:Condition)-[:CAUSED_BY_LOSS_OF]->(e:Enzyme) RETURN c.name AS condition, e.name AS enzyme ORDER BY condition"],
+  ["Drugs and what they act on","MATCH (d:Drug)-[a:ACTS_ON]->(r:Reaction) RETURN d.name AS drug, a.effect AS effect, r.enzyme AS enzyme, r.pathway AS pathway"],
+  ["Metabolites shared by more than one pathway","MATCH (m:Metabolite)-[:IS]->(c:Compound) WITH c, collect(DISTINCT m.pathway) AS paths WHERE size(paths) > 1 RETURN c.name AS compound, paths ORDER BY size(paths) DESC"],
+  ["Everything two steps from uric acid","MATCH (c:Compound {name:'Urate'})<-[:IS]-(m:Metabolite)-[*1..2]-(n) RETURN DISTINCT labels(n)[0] AS kind, coalesce(n.name, n.enzyme) AS name LIMIT 40"],
+  ["Enzyme steps with a known deficiency","MATCH (r:Reaction) WHERE r.deficiency IS NOT NULL RETURN r.pathway AS pathway, r.enzyme AS enzyme, r.deficiency AS deficiency"]
+];
 async function neoStatus(pid){
   const el=$("#pwneo"), btn=$("#pwpush"); if(!el) return;
   try{const st=await api("/api/neo4j/status");
@@ -791,6 +804,17 @@ async function neoStatus(pid){
       !st.configured?"Set NEO4J_URI and NEO4J_PASSWORD to push straight into your database.":`Ready: ${st.uri}, database ${st.database}.`;
     btn.disabled=!(st.driver_installed&&st.configured);
   }catch(e){el.textContent=""}
+  const qb=$("#pwquery"), box=$("#pwquerybox");
+  $("#cypreset").innerHTML=CYPHER_PRESETS.map((p,i)=>`<option value="${i}">${esc(p[0])}</option>`).join("");
+  $("#cypreset").onchange=e=>{$("#cyq").value=CYPHER_PRESETS[e.target.value][1]};
+  $("#cyq").value=CYPHER_PRESETS[0][1];
+  qb.onclick=()=>{box.hidden=!box.hidden};
+  $("#cyrun").onclick=async()=>{
+    const out=$("#cyout"); out.innerHTML=`<p class="note">Running…</p>`;
+    try{const r=await api("/api/neo4j/query",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({cypher:$("#cyq").value})});
+      out.innerHTML=r.rows.length?`<div class="tablewrap"><table><thead><tr>${r.columns.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${r.rows.map(row=>`<tr>${r.columns.map(c=>`<td style="text-align:left;white-space:normal">${esc(row[c])}</td>`).join("")}</tr>`).join("")}</tbody></table></div><p class="note">${r.count} row${r.count===1?"":"s"}.</p>`:`<p class="note">No rows. Have you pushed the pathways yet?</p>`;
+    }catch(e){out.innerHTML=`<p class="err">${esc(e.message)}</p>`}
+  };
   btn.onclick=async()=>{btn.disabled=true;el.textContent="Pushing…";
     try{const r=await api("/api/neo4j/push",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pathway:pid})});
       el.textContent=`Loaded ${Object.entries(r.pushed).map(([k,v])=>`${k} (${v} statements)`).join(", ")} into ${r.uri}.`;
@@ -845,11 +869,13 @@ async function whatIf(node){
   let d;try{d=await api(`/api/pathways/${NET.pid}/whatif?node=${encodeURIComponent(node)}`)}catch(e){box.innerHTML=`<p class="err">${esc(e.message)}</p>`;return}
   let h=`<h3 class="sub" style="margin-top:14px">${esc(d.name||d.label)}</h3>`;
   if(d.deficiency) h+=`<p><b>If this enzyme is missing:</b> ${esc(d.deficiency)}.</p>`;
+  if(d.in_pathways&&d.in_pathways.length>1) h+=`<p class="note">This step appears in: ${d.in_pathways.join(", ")}.</p>`;
   if(d.drugs&&d.drugs.length) h+=`<p><b>Drugs acting here:</b> ${d.drugs.map(x=>`${esc(x.name)} (${esc(x.effect)}${x.note?", "+esc(x.note):""})`).join("; ")}.</p>`;
   h+=d.cases.map(c=>`<h4 style="margin:12px 0 4px">${esc(c.label)}</h4>`+
     (c.changes.length?`<div class="tablewrap"><table><thead><tr><th>Metabolite</th><th>Before</th><th>After</th><th>Change</th></tr></thead><tbody>`+
       c.changes.map(x=>`<tr><td>${esc(x.species)}</td><td>${x.before}</td><td>${x.after}</td><td>${x.after<1e-3?"to zero":x.before<1e-3?"from zero":x.fold>=1?x.fold.toFixed(2)+"x up":(1/x.fold).toFixed(2)+"x down"}</td></tr>`).join("")+
       `</tbody></table></div>`:`<p class="note">Nothing moved measurably.</p>`)+
+    (c.pathways&&Object.keys(c.pathways).length?`<p><b>Pathways affected:</b> ${Object.entries(c.pathways).map(([k,v])=>`${esc(k)} (${v.map(esc).join(", ")})`).join("; ")}.</p>`:"")+
     (c.fluxes.length?`<p class="note">Fluxes that shifted: ${c.fluxes.map(f=>`${esc(f.reaction)} ${f.before} → ${f.after}`).join(", ")}.</p>`:"")+
     (c.settled?"":`<p class="note">This case had not settled by the end of the run: something is still building up.</p>`)).join("");
   box.innerHTML=h;

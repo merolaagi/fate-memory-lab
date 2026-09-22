@@ -75,8 +75,8 @@ _p("tca", "Citric acid cycle (TCA)",
    "The cycle that oxidises acetyl-CoA to CO2, feeding NADH to the respiratory chain. Its conserved cycle "
    "structure makes it a good test of conservation-law analysis.",
    ["Pyr", "AcCoA", "OAA", "Cit", "IsoCit", "AKG", "SucCoA", "Suc", "Fum", "Mal", "CoA", "NAD", "NADH", "CO2",
-    "GDP", "GTP", "Pi"],
-   ["CO2", "Pi", "GDP", "Pyr"],
+    "GDP", "GTP", "Pi", "PEP", "ADP", "ATP"],
+   ["CO2", "Pi", "GDP", "Pyr", "ADP"],
    [R("pdh", "Pyruvate dehydrogenase (entry into the cycle)", "PDH", {"Pyr": 1, "CoA": 1, "NAD": 1},
       {"AcCoA": 1, "NADH": 1, "CO2": 1}, kcat=1.2, km=0.3,
       regulators=[{"species": "NADH", "effect": "inhibit", "k": 1.0}]),
@@ -91,21 +91,26 @@ _p("tca", "Citric acid cycle (TCA)",
     R("sdh", "Succinate dehydrogenase", "SDH", {"Suc": 1}, {"Fum": 1}, kcat=1.5, km=0.4, reversible=True),
     R("fum", "Fumarase", "FUM", {"Fum": 1}, {"Mal": 1}, kcat=2.5, km=0.4, reversible=True),
     R("mdh", "Malate dehydrogenase", "MDH", {"Mal": 1, "NAD": 1}, {"OAA": 1, "NADH": 1}, kcat=1.5, km=0.4, reversible=True),
-    R("etc", "NADH reoxidation (electron transport chain)", "ETC", {"NADH": 1}, {"NAD": 1}, kcat=2.0, km=0.3),
-    R("gtp_use", "GTP consumption", "GTP-use", {"GTP": 1}, {"GDP": 1}, kcat=1.5, km=0.3)],
+    R("etc", "Respiration: NADH reoxidation with ATP synthesis", "ETC", {"NADH": 1, "ADP": 1, "Pi": 1},
+      {"NAD": 1, "ATP": 1}, kcat=2.0, km=0.3),
+    R("gtp_use", "GTP consumption", "GTP-use", {"GTP": 1}, {"GDP": 1}, kcat=1.5, km=0.3),
+    R("atp_use", "ATP consumption (cell work)", "ATPase", {"ATP": 1}, {"ADP": 1, "Pi": 1}, kcat=1.2, km=0.5),
+    R("pepck", "Phosphoenolpyruvate carboxykinase (exit to gluconeogenesis)", "PEPCK",
+      {"OAA": 1}, {"PEP": 1, "CO2": 1}, kcat=1.2, km=0.4),
+    R("pep_out", "PEP into gluconeogenesis", "Transfer", {"PEP": 1}, {}, kcat=1.5, km=0.4)],
    "Berg, Tymoczko and Stryer, citric acid cycle chapter")
 
 
 _p("urea", "Urea cycle",
    "How the body turns toxic ammonia into urea for excretion. Every step has a known inherited deficiency, and "
    "blocking any of them backs ammonia up into the blood.",
-   ["NH3", "CO2", "CP", "Orn", "Cit", "Asp", "ASA", "Arg", "Urea", "Fum"], ["CO2", "Asp"],
+   ["NH3", "CO2", "CP", "Orn", "Citrul", "Asp", "ASA", "Arg", "Urea", "Fum"], ["CO2", "Asp"],
    [R("nh3_in", "Ammonia from protein turnover", "Supply", {}, {"NH3": 1}, kcat=0.3),
     R("cps1", "Carbamoyl phosphate synthetase I", "CPS1", {"NH3": 1, "CO2": 1}, {"CP": 1}, kcat=0.6, km=0.4,
       deficiency="CPS1 deficiency: ammonia builds up from birth, the most severe urea cycle disorder"),
-    R("otc", "Ornithine transcarbamylase", "OTC", {"CP": 1, "Orn": 1}, {"Cit": 1}, kcat=1.5, km=0.3,
+    R("otc", "Ornithine transcarbamylase", "OTC", {"CP": 1, "Orn": 1}, {"Citrul": 1}, kcat=1.5, km=0.3,
       deficiency="OTC deficiency: the commonest urea cycle disorder, X-linked; carbamoyl phosphate spills into orotic acid"),
-    R("ass", "Argininosuccinate synthetase", "ASS", {"Cit": 1, "Asp": 1}, {"ASA": 1}, kcat=1.2, km=0.3,
+    R("ass", "Argininosuccinate synthetase", "ASS", {"Citrul": 1, "Asp": 1}, {"ASA": 1}, kcat=1.2, km=0.3,
       deficiency="Citrullinemia type I: citrulline accumulates"),
     R("asl", "Argininosuccinate lyase", "ASL", {"ASA": 1}, {"Arg": 1, "Fum": 1}, kcat=1.5, km=0.3,
       deficiency="Argininosuccinic aciduria: argininosuccinate accumulates"),
@@ -140,7 +145,7 @@ _p("galactose", "Galactose metabolism (Leloir pathway)",
    "How milk sugar enters glycolysis. A block at the second step is classic galactosemia, where galactose-1-phosphate "
    "accumulates inside cells.",
    ["Gal", "Gal1P", "UDPGlc", "UDPGal", "G1P", "G6P", "ATP", "ADP"], ["ATP", "ADP"],
-   [R("gal_in", "Dietary galactose (lactose)", "Diet", {}, {"Gal": 1}, kcat=0.3),
+   [R("gal_in", "Dietary galactose (lactose)", "Diet", {}, {"Gal": 1}, kcat=0.15),
     R("galk", "Galactokinase", "GALK", {"Gal": 1, "ATP": 1}, {"Gal1P": 1, "ADP": 1}, kcat=0.6, km=0.3,
       deficiency="Galactokinase deficiency: galactose accumulates and forms cataracts, but without the systemic illness of classic galactosemia"),
     R("galt", "Galactose-1-phosphate uridylyltransferase", "GALT", {"Gal1P": 1, "UDPGlc": 1}, {"G1P": 1, "UDPGal": 1},
@@ -193,10 +198,12 @@ def stoichiometry(path):
     return np.stack(cols, axis=1) if cols else np.zeros((len(sp), 0))
 
 
-def conservation_laws(N, species, clamped=(), max_support=4, max_coef=3):
+def conservation_laws(N, species, clamped=(), max_support=None, max_coef=3):
     """Small integer conserved pools: y >= 0 with y @ N = 0, over species that are not held fixed."""
     from itertools import combinations, product
     free = [i for i, sp in enumerate(species) if sp not in clamped]
+    if max_support is None:
+        max_support = 4 if len(free) <= 30 else 3
     rows = {i: N[i] for i in free}
     laws, supports = [], []
     for size in range(2, max_support + 1):
@@ -381,14 +388,18 @@ def rates(path, c, idx, enzyme_scale=None):
     return v
 
 
+COFACTORS = ("ATP", "NAD", "NADP", "CoA", "OAA", "GDP", "Pi", "Glc", "AcCoA", "G6P", "Pyr", "Orn", "UDPGlc",
+             "PRPP", "Asp", "Ado", "Hx", "Phe", "Gal", "NH3", "CO2")
+
+
 def initial_state(path, level=1.0):
     c = {s: 0.05 for s in path["species"]}
     for s in path["clamped"]:
         c[s] = level
-    for s in ("ATP", "NAD", "NADP", "CoA", "OAA", "GDP", "Pi", "Glc", "AcCoA", "G6P", "Pyr", "Orn", "UDPGlc",
-              "PRPP", "Asp", "Ado", "Hx", "Phe", "Gal", "NH3", "CO2"):
+    big = 1.5 if path.get("id") == "all" else 0.6
+    for s in COFACTORS:
         if s in c:
-            c[s] = max(c[s], 0.6)
+            c[s] = max(c[s], big)
     for s in ("ADP", "AMP", "NADH", "NADPH", "GTP"):
         if s in c:
             c[s] = 0.15
@@ -580,6 +591,8 @@ def cypher(path):
         L.append(f"MERGE (m:Metabolite {{name: {_cy(sp)}, pathway: {_cy(path['id'])}}}) "
                  f"SET m.held_fixed = {_cy(sp in path['clamped'])} "
                  f"WITH m MATCH (p:Pathway {{id: {_cy(path['id'])}}}) MERGE (m)-[:IN_PATHWAY]->(p);")
+        L.append(f"MERGE (c:Compound {{name: {_cy(sp)}}}) WITH c "
+                 f"MATCH (m:Metabolite {{name: {_cy(sp)}, pathway: {_cy(path['id'])}}}) MERGE (m)-[:IS]->(c);")
     for r in path["reactions"]:
         L.append(f"MERGE (x:Reaction {{id: {_cy(r['id'])}, pathway: {_cy(path['id'])}}}) "
                  f"SET x.name = {_cy(r['name'])}, x.enzyme = {_cy(r['enzyme'])}, x.kcat = {_cy(r['kcat'])}, "
@@ -610,7 +623,7 @@ def cypher(path):
     return "\n".join(L)
 
 
-def what_if(path, node_id, levels=(0.5, 0.2, 0.0), steps=3000, boost=3.0, tol=0.05):
+def what_if(path, node_id, levels=(0.5, 0.2, 0.0), steps=3000, boost=3.0, tol=0.05, attribute=True):
     """What happens if one thing changes: an enzyme loses activity, or a metabolite is supplied in excess."""
     sp = path["species"]
     base = simulate_pathway(path, steps=steps, record=False)
@@ -618,6 +631,7 @@ def what_if(path, node_id, levels=(0.5, 0.2, 0.0), steps=3000, boost=3.0, tol=0.
     out = {"node": node_id, "kind": kind, "label": key, "baseline_flux": base["flux"], "cases": []}
     if kind == "r":
         r = next((x for x in path["reactions"] if x["id"] == key), None)
+        out["in_pathways"] = path.get("origin_reactions", {}).get(key, [path["id"]])
         if r is None:
             return None
         out["label"] = r["enzyme"]
@@ -627,7 +641,10 @@ def what_if(path, node_id, levels=(0.5, 0.2, 0.0), steps=3000, boost=3.0, tol=0.
         for lv in levels:
             scale = [lv if x["id"] == key else 1.0 for x in path["reactions"]]
             run = simulate_pathway(path, steps=steps, enzyme_scale=scale, record=False)
-            out["cases"].append(_compare(sp, base, run, f"{int(lv * 100)}% activity", tol))
+            case = _compare(sp, base, run, f"{int(lv * 100)}% activity", tol)
+            if attribute and path.get("origin_species"):
+                case["pathways"] = affected_pathways(path, case["changes"])
+            out["cases"].append(case)
     else:
         if key not in sp:
             return None
@@ -638,7 +655,10 @@ def what_if(path, node_id, levels=(0.5, 0.2, 0.0), steps=3000, boost=3.0, tol=0.
             held = dict(path)
             held["clamped"] = sorted(set(path["clamped"]) | {key})
             run = simulate_pathway(held, steps=steps, c0=c0, record=False)
-            out["cases"].append(_compare(sp, base, run, f"{key} held {'high' if f > 1 else 'low'} ({round(f, 2)}x)", tol))
+            case = _compare(sp, base, run, f"{key} held {'high' if f > 1 else 'low'} ({round(f, 2)}x)", tol)
+            if attribute and path.get("origin_species"):
+                case["pathways"] = affected_pathways(path, case["changes"])
+            out["cases"].append(case)
     return out
 
 
@@ -657,3 +677,48 @@ def _compare(sp, base, run, label, tol):
             fl.append({"reaction": rid, "before": round(float(b), 3), "after": round(float(k), 3)})
     fl.sort(key=lambda d: -abs(d["after"] - d["before"]))
     return {"label": label, "changes": changes[:8], "fluxes": fl[:6], "settled": run["steady"]}
+
+
+def merged(pids=None):
+    """All pathways joined into one network through the metabolites they share."""
+    pids = list(pids or PATHWAYS)
+    species, clamped_votes, holders, producers = [], {}, {}, set()
+    reactions, seen = [], {}
+    origin_r, origin_s = {}, {}
+    for pid in pids:
+        p = PATHWAYS[pid]
+        for sp in p["species"]:
+            if sp not in species:
+                species.append(sp)
+            holders.setdefault(sp, []).append(pid)
+            clamped_votes.setdefault(sp, []).append(sp in p["clamped"])
+            origin_s.setdefault(sp, []).append(pid)
+        for r in p["reactions"]:
+            key = (tuple(sorted(r["substrates"].items())), tuple(sorted(r["products"].items())), r["enzyme"])
+            if key in seen:
+                origin_r[seen[key]].append(pid)
+                continue
+            rid = f"{pid}_{r['id']}"
+            seen[key] = rid
+            origin_r[rid] = [pid]
+            reactions.append(dict(r, id=rid))
+            producers.update(r["products"])
+    environment = {"Glc", "Pi", "CO2", "H", "AMP", "GDP", "Asp", "PRPP", "Ado", "O2"}
+    clamped = [sp for sp in species if (all(clamped_votes[sp]) and sp not in producers) or sp in environment]
+    return {"id": "all", "name": "Whole metabolism (all pathways joined)",
+            "description": "Every pathway in the app merged into one network through the metabolites they share, so a "
+                           "change in one pathway can be followed into the others. Reactions that appear in more than "
+                           "one pathway are kept once.",
+            "species": species, "clamped": clamped, "reactions": reactions,
+            "reference": "Union of the individual pathways listed in this app",
+            "origin_reactions": origin_r, "origin_species": origin_s, "members": pids}
+
+
+def affected_pathways(path, changes):
+    """Which source pathways contain the metabolites that moved."""
+    org = path.get("origin_species", {})
+    out = {}
+    for c in changes:
+        for pid in org.get(c["species"], []):
+            out.setdefault(pid, []).append(c["species"])
+    return {k: sorted(set(v)) for k, v in out.items()}

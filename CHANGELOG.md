@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0
+- Whole metabolism: all eight pathways joined into one network through shared metabolites, with structure, simulation, network view and what-if all working on the joined system
+- A what-if on the joined network reports which source pathways the change reaches
+- Respiration now makes ATP and a PEPCK exit drains oxaloacetate, so the joined network reaches a steady state
+- Citrulline renamed so it no longer collides with citrate when the urea and citric acid cycles are joined
+- Read-only Cypher query panel with built-in cross-pathway queries, and Compound nodes so queries can cross pathway boundaries
+- Conserved-pool search adapts its depth to network size, keeping the joined analysis fast
+
 ## 1.0.0
 - Four more pathways with clinical annotations: the urea cycle, phenylalanine and tyrosine catabolism, galactose metabolism, and purine salvage and degradation
 - Every enzyme step carries its known inherited deficiency and the drugs that act on it
