@@ -103,7 +103,7 @@ figure{margin:0}
     <h1>Fate memory lab</h1>
     <p class="lede">Does a sign-consistent circuit, like the ones cells use to hold their identity, make a better memory layer?</p>
   </div>
-  <form id="form">
+  <form id="form" novalidate>
     <label class="f">Run name<input name="name" placeholder="Optional"></label>
     <fieldset><legend>Tasks</legend><div class="checks" id="tasks"></div></fieldset>
     <fieldset><legend>Arms</legend><div class="checks" id="arms"></div></fieldset>
@@ -117,14 +117,14 @@ figure{margin:0}
     <details>
       <summary>More settings</summary>
       <div class="grid2">
-        <label class="f">Learning rate<input name="lr" type="number" step="0.001" min="0.0001"></label>
+        <label class="f">Learning rate<input name="lr" type="number" step="any" min="0.0001"></label>
         <label class="f">Batch<input name="batch" type="number" min="1"></label>
         <label class="f">Train length<input name="train_len" type="number" min="10"></label>
         <label class="f">Test length<input name="test_len" type="number" min="10"></label>
-        <label class="f">Pulse chance<input name="pulse_prob" type="number" step="0.01" min="0.01" max="0.99"></label>
+        <label class="f">Pulse chance<input name="pulse_prob" type="number" step="any" min="0.01" max="0.99"></label>
         <label class="f">Substeps<input name="substeps" type="number" min="1" max="10"></label>
-        <label class="f">Self-excitation<input name="self_excitation" type="number" step="0.5" min="0"></label>
-        <label class="f">Coupling<input name="coupling" type="number" step="0.01" min="0"></label>
+        <label class="f">Self-excitation<input name="self_excitation" type="number" step="any" min="0"></label>
+        <label class="f">Coupling<input name="coupling" type="number" step="any" min="0"></label>
         <label class="f">Drift levels<input name="drift" placeholder="0.1, 0.2, 0.3"></label>
         <label class="f">Noise levels<input name="noise" placeholder="0.02, 0.05, 0.1"></label>
         <label class="f">Division levels<input name="division" placeholder="0.1, 0.25, 0.5"></label>

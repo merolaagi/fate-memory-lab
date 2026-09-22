@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.4.1
+- Fix: Start run silently did nothing in the browser. The learning-rate field's step setting made the default 0.01 count as invalid, so the browser blocked the form without showing why (the field is inside the collapsed More settings). Fields now accept any decimal, and the server does the validation
+
 ## 0.4.0
 - Membrane input stage for every arm: none, saturating Michaelis-Menten transporters, or transporters with gates the circuit controls itself
 - Sign-consistent arm keeps its guarantee through gated channels, by construction of the gate and input signs
