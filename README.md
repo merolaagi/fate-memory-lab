@@ -154,7 +154,59 @@ how much signal gets in at each outside concentration.
 
 *Training loss* shows how each arm learned, one line per seed.
 
-### 4. Save and share results
+### 4. Read the explanation
+
+When a run finishes, a **What this run shows** panel at the top explains it in plain language, task by task: which arm
+did best and whether the lead is real or could be luck, whether flipping one sign mattered, how many stable states
+the winning circuit has and whether the task needs them, how its memory holds up over longer sequences, which stress
+tests hurt it, and what its membrane transporters learned. It ends with suggestions for the next run. The explanation
+is generated locally from the numbers by fixed rules, so it is repeatable and never invents results; it hedges any
+comparison made with fewer than three seeds.
+
+### 5. Build a cell model
+
+Every task section ends with **Build model**. It takes the best trained circuit for that task (you can switch to any
+other arm and seed) and turns it into a standalone model you can see, test and export.
+
+**The layer canvas** draws the model as a chain of mathematical layers, in the same spirit as a network designer.
+Drag layers to rearrange the view and click one to inspect its equation, its parameter count and a heatmap of its
+weights.
+
+| Layer | Math | What it stands for |
+|---|---|---|
+| Signals | x_t | What reaches the outside of the cell |
+| Molecule split | [max(x, 0), max(−x, 0)] | Signals as non-negative concentrations |
+| Transporters | Vmax · m / (Km + m) | Saturating uptake across the membrane |
+| Gated channels | intake · σ(G h + g₀) | Channels the cell opens and closes from its own state; a dashed feedback arrow shows the loop |
+| Input projection | U · intake + b | How what gets in reaches each circuit unit |
+| Cell circuit | h ← h + Δt(−h + σ(W h + d)) | The gene-regulatory-style circuit that holds state, with its recurrent loop |
+| Readout | R h + c | Reads the circuit out as the answer |
+| Decision | on if positive | The cell's yes or no |
+
+**Try it** runs the model on a fresh input it has never seen, drawing the inputs, the model's output and the right
+answer together. *New example* draws another.
+
+**Probe against the biology** checks the model against the rule it was supposed to learn:
+
+- *antagonist*: learned dose-response curves at four antagonist levels, with the true half-occupancy point marked on
+  each. A good model switches on near each mark, and its switch point shifts right as more antagonist competes.
+- *commit*: a map of drug exposures by strength and duration, showing where the model commits against where the
+  cell should. Filled cells where there is no outline are false commitments; outlines with no fill are missed ones.
+
+**Export** downloads the model in three forms, each named with the task, arm, seed and run so files never overwrite
+each other:
+
+- *Python, NumPy only*: a single file with the trained weights built in. `CellModel().run(inputs)` returns outputs and
+  states. It needs nothing but NumPy.
+- *PyTorch module*: the same model as an `nn.Module` with the weights as trainable parameters, ready to fine-tune or
+  drop into a larger network, such as one built in a network designer. Fine-tuning its weights freely does not keep
+  the sign pattern of a sign-consistent circuit.
+- *Layer graph and weights, JSON*: the canvas graph (layers, equations, connections) plus every weight, for importing
+  into other tools.
+
+Runs trained before version 0.5.0 did not save their weights, so models can only be built from new runs.
+
+### 6. Save and share results
 
 Every run is saved automatically in `data/runs` and stays in the Runs list after restarts. Use **Download CSV** for
 a spreadsheet of every task, arm and seed, or **Download JSON** for the complete raw record, including loss curves
@@ -226,6 +278,11 @@ Everything the page does is available over HTTP.
 | POST | `/api/runs/{id}/cancel` | Stop a queued or running run |
 | GET | `/api/runs/{id}/export.csv` | Results as CSV |
 | GET | `/api/runs/{id}/export.json` | Complete raw run record |
+| GET | `/api/runs/{id}/report` | Plain-language explanation of the run |
+| GET | `/api/runs/{id}/model?task=…&arm=…&rep=…` | Layer graph of a trained circuit; best arm and seed if omitted |
+| GET | `/api/runs/{id}/model/simulate?task=…&seed=…` | Run the model on a new example |
+| GET | `/api/runs/{id}/model/probe?task=…` | Dose-response or commitment probe |
+| GET | `/api/runs/{id}/model/export?task=…&kind=numpy\|torch\|json` | Download the model |
 | DELETE | `/api/runs/{id}` | Delete a run |
 
 Example, starting a run from the terminal:
@@ -237,7 +294,9 @@ curl -X POST http://127.0.0.1:47431/api/runs -H 'Content-Type: application/json'
 ## Project layout
 
 ```
-app/engine.py        The model: arms, tasks, training, settling test, landscape, stress tests
+app/engine.py        Arms, tasks, training, settling test, landscape, stress tests
+app/explain.py       Plain-language explanation of a finished run
+app/model.py         Standalone cell model: simulation, probes, layer graph, NumPy and PyTorch export
 app/server.py        FastAPI server: run queue, parallel workers, storage, exports
 app/static/index.html  The whole browser interface in one file
 install.sh           Creates .venv and installs dependencies

@@ -19,6 +19,8 @@ from . import __version__
 from typing import Literal
 
 from .engine import ARMS, DEFAULTS, MEMBRANES, TASKS, Cancelled, run_job
+from .explain import LABEL, explain
+from .model import code_numpy, code_torch, graph, probe, simulate
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = Path(os.environ.get("FML_DATA", ROOT / "data" / "runs"))
@@ -292,3 +294,80 @@ def delete_run(rid: str):
     run_path(rid).unlink(missing_ok=True)
     shutil.rmtree(progress_dir(rid), ignore_errors=True)
     return {"deleted": rid}
+
+
+@app.get("/api/runs/{rid}/report")
+def report(rid: str):
+    return explain(load(rid))
+
+
+def _pick(run, task, arm=None, rep=None):
+    rs = [r for r in run["results"] if r["task"] == task]
+    if not rs:
+        raise HTTPException(404, f"No results for {task} in this run.")
+    rs = [r for r in rs if "model" in r]
+    if not rs:
+        raise HTTPException(409, "This run was trained before version 0.5.0 and did not save its weights. Start a new run to build a model.")
+    if arm is None:
+        means = {}
+        for r in rs:
+            means.setdefault(r["arm"], []).append(r["acc_test_len"])
+        arm = max(means, key=lambda a: sum(means[a]) / len(means[a]))
+    pool = [r for r in rs if r["arm"] == arm]
+    if not pool:
+        raise HTTPException(404, f"No {arm} results for {task}.")
+    if rep is None:
+        return max(pool, key=lambda r: r["acc_test_len"]), rs
+    for r in pool:
+        if r.get("rep", 0) == rep:
+            return r, rs
+    raise HTTPException(404, "No such seed.")
+
+
+def _title(run, r):
+    return (f"Fate Memory Lab cell model: {r['task']} task, {LABEL[r['arm']]} arm, seed {r.get('rep', 0) + 1}, "
+            f"{r.get('membrane', 'direct')} membrane, from run {run['id']} (v{run.get('version', '?')})")
+
+
+@app.get("/api/runs/{rid}/model")
+def model_info(rid: str, task: str, arm: str | None = None, rep: int | None = None):
+    run = load(rid)
+    r, rs = _pick(run, task, arm, rep)
+    return {"task": task, "arm": r["arm"], "rep": r.get("rep", 0), "membrane": r.get("membrane", "direct"),
+            "acc_test_len": r["acc_test_len"], "title": _title(run, r),
+            "candidates": sorted([{"arm": x["arm"], "rep": x.get("rep", 0), "acc": x["acc_test_len"]} for x in rs],
+                                 key=lambda x: (-x["acc"])),
+            "graph": graph(r["model"], task, r), "has_probe": task in ("antagonist", "commit")}
+
+
+@app.get("/api/runs/{rid}/model/simulate")
+def model_simulate(rid: str, task: str, arm: str | None = None, rep: int | None = None, seed: int = 0, length: int = 200):
+    run = load(rid)
+    r, _ = _pick(run, task, arm, rep)
+    return simulate(r["model"], task, T=max(20, min(length, 1000)), seed=seed, p=run["config"]["pulse_prob"])
+
+
+@app.get("/api/runs/{rid}/model/probe")
+def model_probe(rid: str, task: str, arm: str | None = None, rep: int | None = None):
+    run = load(rid)
+    r, _ = _pick(run, task, arm, rep)
+    out = probe(r["model"], task)
+    if out is None:
+        raise HTTPException(404, "No probe for this task.")
+    return out
+
+
+@app.get("/api/runs/{rid}/model/export")
+def model_export(rid: str, task: str, kind: Literal["numpy", "torch", "json"] = "numpy", arm: str | None = None, rep: int | None = None):
+    run = load(rid)
+    r, _ = _pick(run, task, arm, rep)
+    base = f"fate-cell-model-{task}-{r['arm']}-seed{r.get('rep', 0) + 1}-{rid}"
+    title = _title(run, r)
+    if kind == "json":
+        body = json.dumps({"title": title, "task": task, "graph": graph(r["model"], task, r), "spec": r["model"]}, indent=1)
+        return Response(body, media_type="application/json",
+                        headers={"Content-Disposition": f'attachment; filename="{base}.json"'})
+    code = code_numpy(r["model"], task, title) if kind == "numpy" else code_torch(r["model"], task, title)
+    suffix = "numpy" if kind == "numpy" else "torch"
+    return Response(code, media_type="text/x-python",
+                    headers={"Content-Disposition": f'attachment; filename="{base}-{suffix}.py"'})

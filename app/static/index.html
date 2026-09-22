@@ -47,6 +47,26 @@ legend{font-weight:700;margin-bottom:6px}
 .actions a{color:var(--muted);font-size:.9rem}
 .sd{color:var(--muted);font-size:.8em}
 h3.sub{font-family:var(--display);font-weight:500;font-size:1.1rem;margin:28px 0 4px}
+.report{background:var(--surface);border:1px solid var(--rule);border-radius:14px;padding:18px 22px;margin:0 0 8px;max-width:980px}
+.report h3{font-family:var(--display);font-weight:500;font-size:1.15rem;margin:14px 0 4px}
+.report p{margin:.3rem 0;line-height:1.55}
+.report ul{margin:.3rem 0 0;padding-left:1.2rem}
+.modelbox{margin-top:30px;border-top:1px dashed var(--rule);padding-top:20px}
+.modelhead{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;margin-bottom:10px}
+.modelhead select{border:1px solid var(--rule);background:var(--surface);border-radius:6px;padding:5px 8px}
+.canvaswrap{background:var(--surface);border:1px solid var(--rule);border-radius:14px;overflow-x:auto;
+  background-image:radial-gradient(var(--rule) 1px,transparent 1px);background-size:18px 18px}
+.canvaswrap svg{display:block;min-width:760px;width:100%;height:auto;touch-action:none}
+.node{cursor:grab}.node:active{cursor:grabbing}
+.node rect{fill:var(--agar);stroke:var(--ink);stroke-width:1.2}
+.node.sel rect{stroke:var(--focus);stroke-width:2.4}
+.node text{fill:var(--ink);font-family:var(--body);pointer-events:none}
+.inspector{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;margin-top:14px}
+.inspector .eq{font-family:ui-monospace,Menlo,monospace;font-size:.9rem;background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:8px 10px;overflow-x:auto;white-space:nowrap}
+.exports{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.exports a{border:1px solid var(--rule);border-radius:8px;padding:6px 12px;color:var(--ink);text-decoration:none;font-size:.9rem}
+.exports a:hover{border-color:var(--ink)}
+@media (max-width:860px){.inspector{grid-template-columns:1fr}}
 .land svg{width:100%;height:auto;display:block;background:var(--surface);border:1px solid var(--rule);border-radius:14px}
 label.f{display:grid;gap:3px;font-size:.85rem;color:var(--muted)}
 label.f input{border:1px solid var(--rule);background:var(--agar);border-radius:6px;padding:6px 8px;font-size:.95rem;color:var(--ink);width:100%}
@@ -272,11 +292,16 @@ function render(run){
       <figure class="chart"><figcaption>Inhibitor drug: a fraction of the circuit's units partly blocked, to 30% of their activity</figcaption>${stressChart(groups,"inhibitor")}</figure>
       ${groups[0].rs[0].uptake?`<figure class="chart"><figcaption>Membrane uptake: how much signal gets in at each outside concentration, learned transporters averaged</figcaption>${uptakeChart(groups)}</figure>`:""}</div>
       <p class="note">Stress charts show test-length accuracy, mean across seeds. The leftmost point is the undisturbed circuit.</p>
-      <div class="legend">${groups.map(g=>`<span><i class="dot" style="background:${armColor(g.arm)}"></i> ${ARM_INFO[g.arm].label}</span>`).join("")}</div></section>`;
+      <div class="legend">${groups.map(g=>`<span><i class="dot" style="background:${armColor(g.arm)}"></i> ${ARM_INFO[g.arm].label}</span>`).join("")}</div>
+      ${active?"":`<div class="modelbox" data-task="${t}"><h3 class="sub" style="margin-top:0">Cell model</h3>
+        <p class="note">Turn the best trained circuit for this task into a standalone model: see its layers on a canvas, try it on new inputs, probe it against the real biology, and export it as Python.</p>
+        <button class="btn ghost buildbtn">Build model</button><div class="modelbody"></div></div>`}</section>`;
   }
   if(!hasRes&&!active&&!run.error) h+=`<p class="note">This run finished without results.</p>`;
+  if(hasRes&&!active) h=h.replace('<section class="task">','<div id="report" class="report"><p class="note">Writing the explanation of this run…</p></div><section class="task">');
   if(active&&!hasRes) h+=`<p class="note">Each task, arm and seed trains in its own process. Results appear here as each one finishes.</p>`;
   $("#main").innerHTML=h;
+  if(hasRes&&!active){loadReport(run.id);document.querySelectorAll(".modelbox").forEach(b=>{b.querySelector(".buildbtn").onclick=()=>buildModel(run.id,b)})}
   const del=$("#del"); if(del) del.onclick=async()=>{if(!confirm("Delete this run?"))return;await api("/api/runs/"+run.id,{method:"DELETE"});CURRENT=null;location.hash="";$("#main").innerHTML=`<div class="empty"><h2>Run deleted</h2><p>Pick another run or start a new one.</p></div>`;refreshRuns()};
   const stop=$("#stop"); if(stop) stop.onclick=async()=>{stop.disabled=true;stop.textContent="Stopping";try{await api(`/api/runs/${run.id}/cancel`,{method:"POST"})}catch(e){stop.textContent=e.message}};
 }
@@ -323,6 +348,125 @@ function stressChart(groups,key){
   groups.forEach((gr,i)=>{g+=`<polyline fill="none" stroke="${armColor(gr.arm)}" stroke-width="1.8" points="${pts[i].map(q=>X(q[0]).toFixed(1)+","+Y(Math.max(q[1],0.4)).toFixed(1)).join(" ")}"/>`+
     pts[i].map(q=>`<circle cx="${X(q[0]).toFixed(1)}" cy="${Y(Math.max(q[1],0.4)).toFixed(1)}" r="3" fill="${armColor(gr.arm)}"><title>${ARM_INFO[gr.arm].label}, level ${q[0]}: ${Math.round(q[1]*1000)/10}%</title></circle>`).join("")});
   return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Test accuracy under ${key} per arm">${g}</svg>`;
+}
+async function loadReport(rid){
+  const box=$("#report"); if(!box) return;
+  try{const r=await api(`/api/runs/${rid}/report`);
+    box.innerHTML=`<h2 style="margin-bottom:.3rem">What this run shows</h2><p>${esc(r.summary.join(" "))}</p>`+
+      r.tasks.map(t=>`<h3>${esc(t.task)}</h3><p>${esc(t.lines.join(" "))}</p>`).join("")+
+      (r.next.length?`<h3>What to try next</h3><ul>${r.next.map(n=>`<li>${esc(n)}</li>`).join("")}</ul>`:"");
+  }catch(e){box.innerHTML=`<p class="note">Could not write the explanation: ${esc(e.message)}</p>`}
+}
+const MODEL={};
+async function buildModel(rid,box,arm,rep){
+  const task=box.dataset.task, body=box.querySelector(".modelbody");
+  box.querySelector(".buildbtn").style.display="none";
+  body.innerHTML=`<p class="note">Building…</p>`;
+  const q=new URLSearchParams({task});if(arm)q.set("arm",arm);if(rep!==undefined)q.set("rep",rep);
+  let m;try{m=await api(`/api/runs/${rid}/model?${q}`)}catch(e){body.innerHTML=`<p class="err">${esc(e.message)}</p>`;return}
+  const key=rid+task; MODEL[key]={rid,task,info:m,sel:"cell",pos:null,seed:0};
+  const qs=`task=${task}&arm=${m.arm}&rep=${m.rep}`;
+  body.innerHTML=`<div class="modelhead"><label class="note">Circuit <select class="pick">${m.candidates.map(c=>`<option value="${c.arm}|${c.rep}" ${c.arm===m.arm&&c.rep===m.rep?"selected":""}>${ARM_INFO[c.arm].label}, seed ${c.rep+1} (${pct(c.acc)})</option>`).join("")}</select></label>
+      <span class="note">${m.graph.total_params} parameters, ${MEM_INFO[m.membrane].label.toLowerCase()} membrane. Drag layers to rearrange; click one to inspect it.</span></div>
+    <div class="canvaswrap"><svg class="canvas" viewBox="0 0 980 250" role="img" aria-label="Model layers"></svg></div>
+    <div class="inspector"><div class="insp"></div><div class="inspviz"></div></div>
+    <h3 class="sub">Try it</h3><div class="modelhead"><button class="btn ghost simbtn">New example</button><span class="note simnote"></span></div>
+    <figure class="chart simchart"></figure>
+    ${m.has_probe?`<h3 class="sub">Probe against the biology</h3><p class="note probenote"></p><figure class="chart probechart"></figure>`:""}
+    <h3 class="sub">Export</h3><p class="note">Every file name carries the task, arm, seed and run, so downloads never overwrite each other.</p>
+    <div class="exports"><a href="/api/runs/${rid}/model/export?${qs}&kind=numpy">Python, NumPy only</a><a href="/api/runs/${rid}/model/export?${qs}&kind=torch">PyTorch module</a><a href="/api/runs/${rid}/model/export?${qs}&kind=json">Layer graph and weights, JSON</a></div>`;
+  body.querySelector(".pick").onchange=e=>{const [a,r]=e.target.value.split("|");buildModel(rid,box,a,parseInt(r))};
+  drawCanvas(key,body);
+  body.querySelector(".simbtn").onclick=()=>{MODEL[key].seed++;runSim(key,body)};
+  runSim(key,body);
+  if(m.has_probe) runProbe(key,body);
+}
+function drawCanvas(key,body){
+  const st=MODEL[key], g=st.info.graph, svg=body.querySelector(".canvas");
+  const n=g.nodes.length, NW=112, NH=66;
+  if(!st.pos){st.pos={};g.nodes.forEach((nd,i)=>{st.pos[nd.id]={x:20+i*((980-40-NW)/Math.max(1,n-1)),y:92}})}
+  const P=st.pos, ctr=id=>({x:P[id].x+NW/2,y:P[id].y+NH/2});
+  let e=`<defs><marker id="ar-${key}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="var(--muted)"/></marker></defs>`;
+  for(const [a,b,kind] of g.edges){
+    if(a===b){const x=P[a].x+NW/2,y=P[a].y;e+=`<path d="M${x-16},${y} C${x-34},${y-54} ${x+34},${y-54} ${x+16},${y}" fill="none" stroke="var(--muted)" stroke-width="1.4" marker-end="url(#ar-${key})"/><text x="${x}" y="${y-44}" font-size="10" text-anchor="middle" fill="var(--muted)">recurrent</text>`;continue}
+    const A=ctr(a),B=ctr(b);
+    if(kind==="feedback"){const y=Math.max(P[a].y,P[b].y)+NH+44;e+=`<path d="M${A.x},${P[a].y+NH} C${A.x},${y} ${B.x},${y} ${B.x},${P[b].y+NH+2}" fill="none" stroke="var(--broken)" stroke-dasharray="4 3" stroke-width="1.4" marker-end="url(#ar-${key})"/><text x="${(A.x+B.x)/2}" y="${y-8}" font-size="10" text-anchor="middle" fill="var(--muted)">state controls the gates</text>`;continue}
+    const x1=P[a].x+NW,y1=A.y,x2=P[b].x,y2=B.y;
+    e+=`<path d="M${x1},${y1} C${(x1+x2)/2},${y1} ${(x1+x2)/2},${y2} ${x2-2},${y2}" fill="none" stroke="var(--muted)" stroke-width="1.4" marker-end="url(#ar-${key})"/>`;
+  }
+  const nodes=g.nodes.map(nd=>`<g class="node ${st.sel===nd.id?"sel":""}" data-id="${nd.id}" transform="translate(${P[nd.id].x},${P[nd.id].y})" tabindex="0">
+    <rect width="${NW}" height="${NH}" rx="10"/><text x="${NW/2}" y="25" font-size="12.5" font-weight="700" text-anchor="middle">${esc(nd.title)}</text>
+    <text x="${NW/2}" y="42" font-size="10.5" text-anchor="middle" opacity=".7">${esc(nd.type)}</text>
+    <text x="${NW/2}" y="57" font-size="10" text-anchor="middle" opacity=".6">${nd.params?nd.params+" params":"no params"}</text></g>`).join("");
+  svg.innerHTML=e+nodes;
+  svg.querySelectorAll(".node").forEach(el=>{
+    const id=el.dataset.id;
+    el.onclick=()=>{st.sel=id;drawCanvas(key,body)};
+    el.onkeydown=ev=>{if(ev.key==="Enter"||ev.key===" "){st.sel=id;drawCanvas(key,body)}};
+    el.onpointerdown=ev=>{
+      const pt=svg.createSVGPoint(), m0=svg.getScreenCTM().inverse();pt.x=ev.clientX;pt.y=ev.clientY;const s0=pt.matrixTransform(m0);
+      const o={x:P[id].x,y:P[id].y};let moved=false;el.setPointerCapture(ev.pointerId);
+      el.onpointermove=mv=>{pt.x=mv.clientX;pt.y=mv.clientY;const s1=pt.matrixTransform(m0);
+        P[id].x=Math.max(0,Math.min(980-NW,o.x+s1.x-s0.x));P[id].y=Math.max(0,Math.min(250-NH,o.y+s1.y-s0.y));
+        if(Math.abs(s1.x-s0.x)+Math.abs(s1.y-s0.y)>3){moved=true;el.setAttribute("transform",`translate(${P[id].x},${P[id].y})`)}};
+      el.onpointerup=()=>{el.onpointermove=null;if(moved){st.sel=id;drawCanvas(key,body)}};
+    };
+  });
+  const nd=g.nodes.find(x=>x.id===st.sel)||g.nodes[0];
+  body.querySelector(".insp").innerHTML=`<h3 style="margin:0 0 4px">${esc(nd.title)} <span class="note">${esc(nd.type)}</span></h3>
+    <div class="eq">${esc(nd.eq)}</div><p>${esc(nd.detail)}</p><p class="note">${nd.params} trainable parameter${nd.params===1?"":"s"}.</p>`;
+  body.querySelector(".inspviz").innerHTML=nd.matrix?Object.entries(nd.matrix).map(([k,M])=>heatmap(k,M)).join(""):nd.vectors?vectorBars(nd.vectors):"";
+}
+function heatmap(name,M){
+  const r=M.length,c=M[0].length,cs=Math.max(4,Math.min(14,Math.floor(300/Math.max(r,c))));
+  const mx=Math.max(...M.flat().map(Math.abs),1e-9);
+  let cells="";M.forEach((row,i)=>row.forEach((v,j)=>{cells+=`<rect x="${j*cs}" y="${i*cs}" width="${cs}" height="${cs}" fill="${v>=0?"var(--contract)":"var(--broken)"}" fill-opacity="${(Math.abs(v)/mx).toFixed(3)}"><title>${name}[${i},${j}] = ${v}</title></rect>`}));
+  return `<figure class="chart"><figcaption>${name}: ${r}×${c}. Blue excites, red inhibits; darker is stronger (max ${mx.toFixed(2)}).</figcaption><svg viewBox="0 0 ${c*cs} ${r*cs}" style="max-width:${c*cs*1.4}px" role="img" aria-label="${name} weight heatmap">${cells}</svg></figure>`;
+}
+function vectorBars(V){
+  return Object.entries(V).map(([k,a])=>{const mx=Math.max(...a,1e-9),w=300,bh=12;
+    return `<figure class="chart"><figcaption>${k} per transporter (max ${mx.toFixed(2)})</figcaption><svg viewBox="0 0 ${w} ${a.length*(bh+4)}" style="max-width:${w}px" role="img" aria-label="${k} values">${a.map((v,i)=>`<rect x="0" y="${i*(bh+4)}" width="${(w-40)*v/mx}" height="${bh}" fill="var(--free)" rx="3"/><text x="${(w-40)*v/mx+6}" y="${i*(bh+4)+10}" font-size="10" fill="var(--muted)">${v}</text>`).join("")}</svg></figure>`}).join("");
+}
+async function runSim(key,body){
+  const st=MODEL[key],m=st.info;
+  const d=await api(`/api/runs/${st.rid}/model/simulate?task=${st.task}&arm=${m.arm}&rep=${m.rep}&seed=${st.seed}`);
+  body.querySelector(".simnote").textContent=`Example ${st.seed+1}: ${pct(d.accuracy)} of steps correct.`;
+  const w=900,h=260,p=40,T=d.inputs[0].length,X=t=>p+(w-10-p)*t/(T-1);
+  const imax=Math.max(...d.inputs.flat().map(Math.abs),1e-9);
+  const top=v=>70-50*v/imax, bot=v=>200-45*Math.max(-1.5,Math.min(1.5,v));
+  let g=`<text x="${p}" y="14" font-size="11" fill="var(--muted)">Inputs: ${esc(d.input_names.join(", "))}</text><line x1="${p}" x2="${w-10}" y1="70" y2="70" stroke="var(--rule)"/>`;
+  d.inputs.forEach((row,i)=>{g+=`<polyline fill="none" stroke="${wellColor(i+3)}" stroke-width="1.3" points="${row.map((v,t)=>X(t).toFixed(1)+","+top(v).toFixed(1)).join(" ")}"/>`});
+  g+=`<text x="${p}" y="126" font-size="11" fill="var(--muted)">Output (solid) against the right answer (dashed): ${esc(d.output_names.join(", "))}</text><line x1="${p}" x2="${w-10}" y1="200" y2="200" stroke="var(--rule)"/>`;
+  d.target.forEach((row,i)=>{g+=`<polyline fill="none" stroke="var(--ink)" stroke-dasharray="4 3" stroke-width="1.1" points="${row.map((v,t)=>X(t).toFixed(1)+","+bot(v).toFixed(1)).join(" ")}"/>`});
+  d.output.forEach((row,i)=>{g+=`<polyline fill="none" stroke="${i?wellColor(i+7):armColor(m.arm)}" stroke-width="1.8" points="${row.map((v,t)=>X(t).toFixed(1)+","+bot(v).toFixed(1)).join(" ")}"/>`});
+  g+=`<text x="${w-10}" y="${h-4}" font-size="10" text-anchor="end" fill="var(--muted)">time step ${T}</text>`;
+  body.querySelector(".simchart").innerHTML=`<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Model simulation on a new example">${g}</svg>`;
+}
+async function runProbe(key,body){
+  const st=MODEL[key],m=st.info;
+  const d=await api(`/api/runs/${st.rid}/model/probe?task=${st.task}&arm=${m.arm}&rep=${m.rep}`);
+  const box=body.querySelector(".probechart"), note=body.querySelector(".probenote");
+  if(d.kind==="dose_response"){
+    note.textContent="Steady response to the agonist at four antagonist levels. The vertical dashed lines mark where the receptor truly reaches half occupancy; a good model crosses zero near each line, and its switch point moves right as more antagonist competes for the receptor.";
+    const w=620,h=260,p=42,xs=d.agonist,all=d.curves.flatMap(c=>c.response),lo=Math.min(-1.2,...all),hi=Math.max(1.2,...all);
+    const X=v=>p+(w-10-p)*v/xs[xs.length-1],Y=v=>h-p-(h-p-10)*(v-lo)/(hi-lo);
+    let g=axes(w,h,p,xs[xs.length-1],lo,hi,"agonist level",v=>v.toFixed(1))+`<line x1="${p}" x2="${w-10}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--rule)"/>`;
+    d.curves.forEach((c,i)=>{const col=wellColor(i+1);
+      g+=`<line x1="${X(c.threshold_true)}" x2="${X(c.threshold_true)}" y1="10" y2="${h-p}" stroke="${col}" stroke-dasharray="3 3"/>`+
+      `<polyline fill="none" stroke="${col}" stroke-width="2" points="${xs.map((x,j)=>X(x).toFixed(1)+","+Y(c.response[j]).toFixed(1)).join(" ")}"><title>antagonist ${c.antagonist}</title></polyline>`});
+    box.innerHTML=`<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Learned dose-response curves">${g}</svg><div class="legend">${d.curves.map((c,i)=>`<span><i class="dot" style="background:${wellColor(i+1)}"></i> antagonist ${c.antagonist}</span>`).join("")}</div>`;
+  } else if(d.kind==="commit_map"){
+    note.textContent="Each cell is one drug exposure: strength across, duration down. Filled cells are exposures after which the model stays committed; outlined cells are the ones that should commit. Where the two agree, the model has learned the cell's decision rule.";
+    const A=d.amplitude,D=d.duration,cs=22,p=46,w=p+A.length*cs+10,h=p+D.length*cs+10;
+    let g="";
+    D.forEach((dur,i)=>A.forEach((a,j)=>{const on=d.output[i][j]>0,tr=d.truth[i][j]===1;
+      g+=`<rect x="${p+j*cs+1}" y="${10+i*cs+1}" width="${cs-2}" height="${cs-2}" rx="3" fill="${on?armColor(m.arm):"var(--well)"}"${tr?` stroke="var(--ink)" stroke-width="2"`:""}><title>strength ${a}, ${dur} steps: model ${on?"commits":"does not"}, biology ${tr?"commits":"does not"}</title></rect>`}));
+    D.forEach((dur,i)=>{if(i%3===0)g+=`<text x="${p-6}" y="${10+i*cs+15}" font-size="10" text-anchor="end" fill="var(--muted)">${dur}</text>`});
+    A.forEach((a,j)=>{if(j%3===0)g+=`<text x="${p+j*cs+cs/2}" y="${h}" font-size="10" text-anchor="middle" fill="var(--muted)">${a}</text>`});
+    const agree=d.output.flat().filter((v,k)=>(v>0)===(d.truth.flat()[k]===1)).length/d.output.flat().length;
+    note.textContent+=` Agreement: ${pct(agree)}.`;
+    box.innerHTML=`<svg viewBox="0 0 ${w} ${h+4}" style="max-width:${w*1.3}px" role="img" aria-label="Commitment map, model against biology">${g}</svg><p class="note">Down: exposure duration in steps. Across: drug strength.</p>`;
+  }
 }
 function uptakeChart(groups){
   const w=360,h=200,p=42;

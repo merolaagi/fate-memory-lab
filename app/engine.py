@@ -162,6 +162,30 @@ def make_drive(arm, S, mode):
     return drive
 
 
+def effective(arm, P, S, mode):
+    signed = mode == "gated" and arm in ("coop", "broken")
+    out = {"U": onp.asarray(P["U"]), "b": onp.asarray(P["b"]), "R": onp.asarray(P["R"]), "c": onp.asarray(P["c"])}
+    if mode != "direct":
+        out["vmax"] = onp.log1p(onp.exp(P["vmax"]))
+        out["km"] = onp.log1p(onp.exp(P["km"])) + 1e-3
+        if signed:
+            out["U"] = S["s"][:, None] * S["t"][None, :] * onp.log1p(onp.exp(P["U"]))
+    if mode == "gated":
+        out["G"] = S["t"][:, None] * S["s"][None, :] * onp.log1p(onp.exp(P["G"])) if signed else onp.asarray(P["G"])
+        out["g0"] = onp.asarray(P["g0"])
+    return out
+
+
+def export_spec(arm, P, S, W, mode, cfg, tk):
+    eff = effective(arm, P, S, mode)
+    spec = {"format": "fate-memory-lab/cell-model", "version": 1, "arm": arm, "membrane": mode,
+            "dt": DT, "substeps": cfg["substeps"], "hidden": int(W.shape[0]), "nin": tk["nin"], "nout": tk["nout"],
+            "W": onp.round(W, 5).tolist()}
+    for k, v in eff.items():
+        spec[k] = onp.round(v, 5).tolist()
+    return spec
+
+
 def uptake_curve(P):
     if "vmax" not in P:
         return None
@@ -402,5 +426,6 @@ def run_job(task, arm, cfg, progress=None, rep=0):
     result["inhibitor"] = [{"eps": e, "acc": perturbed_accuracy(task, P, W, cfg, D, inhibit=e)} for e in cfg.get("inhibitor", [])]
     result["membrane"] = mode
     result["uptake"] = uptake_curve(P)
+    result["model"] = export_spec(arm, P, S, W, mode, cfg, tk)
     result["seconds"] = round(time.time() - t0, 1)
     return result

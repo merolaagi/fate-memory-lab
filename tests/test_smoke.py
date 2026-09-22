@@ -71,3 +71,51 @@ def test_drug_tasks_balanced():
     assert 0.35 < (y > 0).mean() < 0.65
     u, y = make_batch("commit", 256, 400, 0.05, 3)
     assert ((y[1:] - y[:-1]) < 0).sum() == 0
+
+
+def test_model_export_matches_engine(tmp_path):
+    import importlib.util
+
+    import numpy as np
+
+    from app.model import CellModel, code_numpy, code_torch, graph, probe
+
+    for mode, task in (("gated", "antagonist"), ("transporter", "commit"), ("direct", "flipflop")):
+        r = run_job(task, "coop", tiny(membrane=mode))
+        spec = r["model"]
+        assert graph(spec, task, r)["total_params"] == r["params"]
+        path = tmp_path / f"m_{mode}.py"
+        path.write_text(code_numpy(spec, task, "t"))
+        sp = importlib.util.spec_from_file_location(f"m_{mode}", path)
+        mod = importlib.util.module_from_spec(sp)
+        sp.loader.exec_module(mod)
+        u, _ = make_batch(task, 3, 40, 0.1, 5)
+        a, _ = mod.CellModel().run(u)
+        b, _ = CellModel(spec).run(u)
+        assert np.abs(a - b).max() < 1e-4
+        compile(code_torch(spec, task, "t"), "t", "exec")
+        if task in ("antagonist", "commit"):
+            assert probe(spec, task)["kind"]
+
+
+def test_report_and_model_api(tmp_path, monkeypatch):
+    monkeypatch.setenv("FML_DATA", str(tmp_path))
+    import importlib
+    import app.server as server
+    importlib.reload(server)
+    with TestClient(server.app) as client:
+        rid = client.post("/api/runs", json=tiny(tasks=["commit"], arms=["coop", "free"], membrane="transporter")).json()["id"]
+        for _ in range(240):
+            run = client.get(f"/api/runs/{rid}").json()
+            if run["status"] in ("done", "failed"):
+                break
+            time.sleep(0.5)
+        assert run["status"] == "done", run.get("error")
+        rep = client.get(f"/api/runs/{rid}/report").json()
+        assert rep["tasks"][0]["lines"]
+        m = client.get(f"/api/runs/{rid}/model", params={"task": "commit"}).json()
+        assert m["graph"]["nodes"][0]["type"] == "Input"
+        sim = client.get(f"/api/runs/{rid}/model/simulate", params={"task": "commit", "seed": 2}).json()
+        assert len(sim["output"][0]) == 200
+        ex = client.get(f"/api/runs/{rid}/model/export", params={"task": "commit", "kind": "torch"})
+        assert "fate-cell-model-commit" in ex.headers["content-disposition"]

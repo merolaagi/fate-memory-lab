@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0
+- What this run shows: a plain-language explanation of every finished run, generated locally by fixed rules, with suggested next steps
+- Build model: turns any trained arm and seed into a standalone cell model
+- Layer canvas: draggable graph of the model's mathematical layers, with equations, parameter counts and weight heatmaps
+- Try it: runs the model on fresh inputs against the right answer
+- Probes against the biology: dose-response curves for antagonist, commitment map for commit
+- Export as NumPy-only Python, a PyTorch module, or a JSON layer graph with weights; file names are unique per task, arm, seed and run
+- Runs now save each circuit's trained weights
+
 ## 0.4.1
 - Fix: Start run silently did nothing in the browser. The learning-rate field's step setting made the default 0.01 count as invalid, so the browser blocked the form without showing why (the field is inside the collapsed More settings). Fields now accept any decimal, and the server does the validation
 
