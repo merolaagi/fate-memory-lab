@@ -149,3 +149,45 @@ def test_reachability_order_theorem_holds_for_sign_consistent_gated():
     assert R["theory"] is not None and R["theory"]["holds"]
     assert R["theory"]["violations"] == 0
     assert all(len(a["escape"]) == len(R["sigmas"]) for a in R["attractors"])
+
+
+def test_pathway_structure_and_simulation():
+    from app.pathways import PATHWAYS, analyse, simulate_pathway
+
+    for pid, p in PATHWAYS.items():
+        a = analyse(p)
+        assert a["structure"]["complexes"] > 0 and a["notes"]
+        assert len(a["stoichiometry"]) == len(p["species"])
+        s = simulate_pathway(p, steps=600)
+        assert max(s["final"]) < 50
+    gly = analyse(PATHWAYS["glycolysis"])
+    pools = {tuple(sorted(sp for sp, _ in law)) for law in gly["conservation"]}
+    assert ("NAD", "NADH") in pools
+    assert ("ADP", "ATP") in pools
+    base = simulate_pathway(PATHWAYS["glycolysis"], steps=2500)
+    scale = [0.2 if r["id"] == "pfk" else 1.0 for r in PATHWAYS["glycolysis"]["reactions"]]
+    ko = simulate_pathway(PATHWAYS["glycolysis"], steps=2500, enzyme_scale=scale)
+    atp = PATHWAYS["glycolysis"]["species"].index("ATP")
+    assert ko["final"][atp] < base["final"][atp]
+
+
+def test_workspace_edit_simulate_export(tmp_path, monkeypatch):
+    monkeypatch.setenv("FML_DATA", str(tmp_path / "runs"))
+    monkeypatch.setenv("FML_WORKSPACES", str(tmp_path / "ws"))
+    import importlib
+    import app.server as server
+    importlib.reload(server)
+    with TestClient(server.app) as client:
+        w = client.post("/api/workspaces", json={"pathway": "glycolysis"}).json()
+        assert w["compile"]["errors"] == []
+        wid = w["id"]
+        w = client.post(f"/api/workspaces/{wid}/layers", json={"type": "gate", "after": 0}).json()
+        assert any(l["type"] == "gate" for l in w["layers"])
+        layers = [l for l in w["layers"] if l["type"] != "gate"]
+        w = client.put(f"/api/workspaces/{wid}", json={"layers": layers, "name": "edited"}).json()
+        assert w["name"] == "edited"
+        sim = client.post(f"/api/workspaces/{wid}/simulate", json={"length": 40}).json()
+        assert len(sim["output"][0]) == 40 and sim["trace"]
+        code = client.get(f"/api/workspaces/{wid}/code").json()["code"]
+        compile(code, "ws", "exec")
+        assert client.delete(f"/api/workspaces/{wid}").status_code == 200

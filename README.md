@@ -64,6 +64,59 @@ memory actually holds over time rather than just fitting the training length.
 
 ---
 
+## The three tabs
+
+**Runs** trains and compares arms, as described above. **Models** is an editable workspace where you build a model by
+hand. **Pathways** holds real metabolic pathways and what their structure implies.
+
+## Models: the workspace
+
+A workspace is a model you assemble yourself, as a chain of layers on a canvas. Nothing is trained here; workspaces
+are for building, inspecting, running and exporting.
+
+Start one three ways: blank, from a metabolic pathway, or from the best trained circuit of the run you have open.
+Then click any layer to edit it, insert layers, delete them, run the model on an input you choose, read the generated
+NumPy code and download it. Every edit recompiles the model: sizes are rechecked, mismatched weights are rebuilt, and
+anything that cannot work is reported as an error rather than failing silently.
+
+| Layer | Math | Notes |
+|---|---|---|
+| Signals | x_t | Number of input channels |
+| Molecule split | [max(x, 0), max(-x, 0)] | Signals as non-negative concentrations |
+| Transporters | Vmax m / (Km + m) | Saturating membrane uptake, per-channel Vmax and Km |
+| Gated channels | intake x sigmoid(G h + g0) | Channels the circuit opens and closes itself |
+| Linear map | U x + b | Sized automatically to whatever follows |
+| Cell circuit | h <- h + dt(-h + sigmoid(W h + d)) | Units, step size, substeps, and the wiring rule: sign-consistent, one-cycle-flipped, contraction or free |
+| Metabolic pathway | dc/dt = N v(c) + inflow | A real pathway as a layer: choose which species the input feeds and which are read out |
+| Readout | R h + c | Number of outputs |
+| Decision | on if positive | |
+
+Changing a circuit's wiring rule rebuilds its weights under that rule, so you can compare structures directly. The
+pathway layer keeps its own concentrations across time steps, and its species are drawn under the model's output when
+you run it.
+
+## Pathways
+
+Four pathways ship with the app: glycolysis, lactate fermentation, the oxidative pentose phosphate pathway, and the
+citric acid cycle. Stoichiometry follows standard textbook reactions, including the classic allosteric controls such
+as ATP inhibiting phosphofructokinase. **Rate constants are illustrative, not fitted to measurements.** Structural
+results are therefore exact and transferable; specific concentrations and timings are not.
+
+For each pathway the app reports:
+
+- **Conserved pools** found exactly: quantities the reactions move around but never create or destroy, such as
+  NAD + NADH or ATP + ADP.
+- **Network structure**: species, reactions, complexes, linkage classes, stoichiometric rank, and the **deficiency**,
+  with what the deficiency theorems do and do not say about it.
+- **Sign-consistency**: whether the influence graph has negative feedback cycles. If it has none the network is
+  monotone, the same structure the bench's sign-consistent arm enforces, and it cannot sustain oscillations. If it has
+  conflicts, they are listed by name, so you can see exactly which regulation breaks monotonicity.
+- **Time courses**, with a one-click **knockdown** of any enzyme to 20% of its activity, the in-model equivalent of an
+  inhibitor drug.
+
+This is where the bench's question meets real biochemistry: the arms compare wiring rules on invented tasks, and the
+pathway analyser reports which of those rules real metabolic networks actually satisfy.
+
 ## Quick start
 
 You need macOS (or Linux) with Python 3.10 or newer.
@@ -322,6 +375,11 @@ Everything the page does is available over HTTP.
 | GET | `/api/runs/{id}/model/probe?task=…` | Dose-response or commitment probe |
 | GET | `/api/runs/{id}/model/export?task=…&kind=numpy\|torch\|json` | Download the model |
 | DELETE | `/api/runs/{id}` | Delete a run |
+| GET | `/api/pathways`, `/api/pathways/{id}`, `/api/pathways/{id}/simulate?knockdown=...` | Pathway list, structural analysis, simulation |
+| GET/POST | `/api/workspaces` | List or create a workspace |
+| GET/PUT/DELETE | `/api/workspaces/{id}` | Read, edit or delete a workspace |
+| POST | `/api/workspaces/{id}/layers`, `/api/workspaces/{id}/simulate` | Insert a layer, run the model |
+| GET | `/api/workspaces/{id}/code?download=true` | The model as a NumPy file |
 
 Example, starting a run from the terminal:
 
@@ -334,6 +392,8 @@ curl -X POST http://127.0.0.1:47431/api/runs -H 'Content-Type: application/json'
 ```
 app/engine.py        Arms, tasks, training, settling test, landscape, stress tests
 app/explain.py       Plain-language explanation of a finished run
+app/pathways.py      Pathway library, structural analysis (deficiency, conservation, sign-consistency), simulation
+app/workspace.py     Editable layer workspace: compile, run, code generation
 app/model.py         Standalone cell model: simulation, probes, layer graph, NumPy and PyTorch export
 app/server.py        FastAPI server: run queue, parallel workers, storage, exports
 app/static/index.html  The whole browser interface in one file

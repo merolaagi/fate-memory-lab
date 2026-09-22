@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0
+- Three tabs: Runs, Models and Pathways
+- Models: an editable workspace. Build a model layer by layer on a canvas, starting blank or from a pathway or a trained circuit; edit, insert and delete layers; run it on inputs you choose; read and download the generated NumPy code
+- Layers include transporters, gated channels, linear maps, the cell circuit with a selectable wiring rule, readout, decision, and a metabolic pathway as a layer
+- Pathways: glycolysis, lactate fermentation, the oxidative pentose phosphate pathway and the citric acid cycle, with textbook stoichiometry and illustrative rate constants
+- Exact structural analysis per pathway: conserved pools, complexes, linkage classes, rank, deficiency with what the theorems say, and sign-consistency with the specific regulations that break it
+- Pathway simulation with one-click enzyme knockdown to 20%, the in-model equivalent of an inhibitor
+
 ## 0.7.0
 - Reachability map for every built model: stable states, which states each input kick can reach, traps no kick can leave, and states found only by kicking
 - Escape barriers: the noise level needed to knock the cell out of each state

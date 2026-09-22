@@ -7,3 +7,5 @@ data/runs/*
 .DS_Store
 *.zip
 .pytest_cache/
+data/workspaces/*
+!data/workspaces/.keep

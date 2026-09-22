@@ -47,6 +47,14 @@ legend{font-weight:700;margin-bottom:6px}
 .actions a{color:var(--muted);font-size:.9rem}
 .sd{color:var(--muted);font-size:.8em}
 h3.sub{font-family:var(--display);font-weight:500;font-size:1.1rem;margin:28px 0 4px}
+.nav{display:flex;gap:4px;border:1px solid var(--rule);border-radius:10px;padding:3px;background:var(--agar)}
+.nav button{flex:1;background:none;border:0;border-radius:7px;padding:7px 4px;cursor:pointer;font-size:.92rem;color:var(--ink)}
+.nav button[aria-current="true"]{background:var(--surface);font-weight:700}
+.fields{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}
+.fields label{display:grid;gap:3px;font-size:.85rem;color:var(--muted)}
+.fields input,.fields select{border:1px solid var(--rule);background:var(--agar);border-radius:6px;padding:5px 7px;color:var(--ink);font-size:.92rem}
+pre.code{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:14px;overflow:auto;max-height:420px;font-size:.78rem;line-height:1.45}
+.pill{display:inline-block;border:1px solid var(--rule);border-radius:999px;padding:2px 10px;font-size:.8rem;margin:0 6px 6px 0}
 .report{background:var(--surface);border:1px solid var(--rule);border-radius:14px;padding:18px 22px;margin:0 0 8px;max-width:980px}
 .report h3{font-family:var(--display);font-weight:500;font-size:1.15rem;margin:14px 0 4px}
 .report p{margin:.3rem 0;line-height:1.55}
@@ -123,6 +131,12 @@ figure{margin:0}
     <h1>Fate memory lab</h1>
     <p class="lede">Does a sign-consistent circuit, like the ones cells use to hold their identity, make a better memory layer?</p>
   </div>
+  <nav class="nav" id="nav">
+    <button type="button" data-view="runs" aria-current="true">Runs</button>
+    <button type="button" data-view="models">Models</button>
+    <button type="button" data-view="pathways">Pathways</button>
+  </nav>
+  <div id="runpanel">
   <form id="form" novalidate>
     <label class="f">Run name<input name="name" placeholder="Optional"></label>
     <fieldset><legend>Tasks</legend><div class="checks" id="tasks"></div></fieldset>
@@ -158,6 +172,19 @@ figure{margin:0}
   <div>
     <h3>Runs</h3>
     <ul class="runs" id="runs"></ul>
+  </div>
+  </div>
+  <div id="modelpanel" hidden>
+    <h3>Build a model</h3>
+    <p class="note">A workspace is an editable model: add, remove and change layers, run it, read and download its code. Nothing is trained here.</p>
+    <div class="modelhead"><select id="wsnew"><option value="blank">Blank model</option></select><button class="btn" id="wsadd" type="button">Create</button></div>
+    <h3>Your models</h3>
+    <ul class="runs" id="wslist"></ul>
+  </div>
+  <div id="pathpanel" hidden>
+    <h3>Pathways</h3>
+    <p class="note">Real metabolic pathways with textbook stoichiometry. The structure is analysed exactly; rate constants are illustrative.</p>
+    <ul class="runs" id="pwlist"></ul>
   </div>
   <p class="note" id="ver"></p>
 </aside>
@@ -569,6 +596,193 @@ function landscapeFig(r){
   return `<figure class="land plate"><figcaption><b><i class="dot" style="background:${armColor(r.arm)}"></i>${label}</b><span>${v[0]+v[1]}% of variation shown</span></figcaption>
     <svg viewBox="0 0 ${w} ${h}" role="img" aria-label="${label}: settling trajectories projected onto two main directions">${g}</svg></figure>`;
 }
+
+let VIEW="runs", WSMETA=null, WSCUR=null, WSSEL=null, PWCUR=null;
+function setView(v){
+  VIEW=v;
+  document.querySelectorAll("#nav button").forEach(b=>b.setAttribute("aria-current",String(b.dataset.view===v)));
+  $("#runpanel").hidden=v!=="runs"; $("#modelpanel").hidden=v!=="models"; $("#pathpanel").hidden=v!=="pathways";
+  if(v==="runs"){CURRENT?select(CURRENT):($("#main").innerHTML=`<div class="empty"><h2>No run selected</h2><p>Start a run on the left.</p></div>`)}
+  if(v==="models"){listWorkspaces();$("#main").innerHTML=`<div class="empty"><h2>Models</h2><p>Open one of your models, or create a new one on the left: blank, from a metabolic pathway, or from the best circuit of the run you have open.</p></div>`}
+  if(v==="pathways"){listPathways();$("#main").innerHTML=`<div class="empty"><h2>Pathways</h2><p>Pick a pathway to see its structure, what the theorems say about it, and how it behaves when an enzyme is knocked down.</p></div>`}
+}
+document.querySelectorAll("#nav button").forEach(b=>b.onclick=()=>setView(b.dataset.view));
+
+async function listWorkspaces(){
+  if(!WSMETA){WSMETA=await api("/api/workspaces/meta");
+    $("#wsnew").innerHTML=`<option value="blank">Blank model</option>`+WSMETA.pathways.map(p=>`<option value="path:${p.id}">From ${esc(p.name)}</option>`).join("")+`<option value="run">From the open run's best circuit</option>`}
+  const ws=await api("/api/workspaces");
+  $("#wslist").innerHTML=ws.length?ws.map(w=>`<li><button data-id="${w.id}" aria-current="${WSCUR&&w.id===WSCUR.id}"><span class="nm">${esc(w.name)}</span><span class="sub">${w.layers.length} layers: ${esc(w.layers.join(" → "))}</span></button></li>`).join(""):`<li class="note">No models yet.</li>`;
+  document.querySelectorAll("#wslist button").forEach(b=>b.onclick=()=>openWorkspace(b.dataset.id));
+}
+$("#wsadd").onclick=async()=>{
+  const v=$("#wsnew").value; let body={};
+  if(v.startsWith("path:")) body={pathway:v.slice(5)};
+  else if(v==="run"){
+    if(!CURRENT){alert("Open a finished run on the Runs tab first.");return}
+    const run=await api("/api/runs/"+CURRENT);
+    body={run_id:CURRENT,task:run.config.tasks[0]};
+  }
+  try{const w=await api("/api/workspaces",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    await listWorkspaces(); openWorkspace(w.id);
+  }catch(e){alert("Could not create the model: "+e.message)}
+};
+async function saveWs(patch){
+  WSCUR=await api("/api/workspaces/"+WSCUR.id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch)});
+  return WSCUR;
+}
+async function openWorkspace(id){
+  const w=await api("/api/workspaces/"+id); WSCUR=w;
+  WSSEL=(WSSEL&&w.layers.some(l=>l.id===WSSEL))?WSSEL:w.layers[0].id;
+  const c=w.compile||{errors:[],notes:[]}, nin=w.layers[0].params.channels||1;
+  $("#main").innerHTML=`<div class="runhead"><div><h2>${esc(w.name)}</h2>
+      <p class="note">${w.layers.length} layers. Click a layer to edit it. Every change saves and recompiles.</p></div>
+      <div class="actions"><a href="/api/workspaces/${id}/code?download=true">Download Python</a><button class="btn ghost" id="wsdel">Delete model</button></div></div>
+    <div id="wsmsg">${c.errors.length?`<div class="err">${c.errors.map(esc).join("\n")}</div>`:""}${c.notes.length?`<p class="note">${c.notes.map(esc).join(" ")}</p>`:""}</div>
+    <div class="canvaswrap"><svg class="wscanvas" viewBox="0 0 980 190" role="img" aria-label="Model layers"></svg></div>
+    <div class="modelhead"><label class="note">Add <select id="wsaddsel">${Object.entries(WSMETA.layer_types).map(([k,v])=>`<option value="${k}">${esc(v.title)}</option>`).join("")}</select></label>
+      <button class="btn ghost" id="wsaddbtn">Insert after selected</button>
+      <button class="btn ghost" id="wsdellayer">Delete selected</button></div>
+    <div class="inspector"><div class="wsinsp"></div><div class="wsviz"></div></div>
+    <h3 class="sub">Run it</h3>
+    <div class="modelhead"><label class="note">Steps <input id="wslen" type="number" value="150" min="10" max="2000" style="width:80px"></label><button class="btn ghost" id="wsrun">Run</button></div>
+    <div class="fields" id="wswaves"></div>
+    <figure class="chart wsout"></figure>
+    <h3 class="sub">Code</h3><p class="note">The model as a single NumPy file, regenerated from the layers above.</p><pre class="code" id="wscode">Loading…</pre>`;
+  $("#wsdel").onclick=async()=>{if(!confirm("Delete this model?"))return;await api("/api/workspaces/"+id,{method:"DELETE"});WSCUR=null;setView("models")};
+  $("#wsaddbtn").onclick=async()=>{const at=w.layers.findIndex(l=>l.id===WSSEL);
+    await api(`/api/workspaces/${id}/layers`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:$("#wsaddsel").value,after:at})});openWorkspace(id)};
+  $("#wsdellayer").onclick=async()=>{if(w.layers.length<2)return;await api(`/api/workspaces/${id}/layers/${WSSEL}`,{method:"DELETE"});WSSEL=null;openWorkspace(id)};
+  $("#wsrun").onclick=()=>runWs();
+  drawWs(); buildWaves(nin); loadWsCode(id); listWorkspaces();
+}
+function drawWs(){
+  const w=WSCUR, svg=document.querySelector(".wscanvas"), L=w.layers, NW=112,NH=62,n=L.length;
+  const X=i=>18+i*((980-36-NW)/Math.max(1,n-1)), Y=70;
+  let g=`<defs><marker id="wa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="var(--muted)"/></marker></defs>`;
+  for(let i=0;i<n-1;i++){g+=`<path d="M${X(i)+NW},${Y+NH/2} C${X(i)+NW+30},${Y+NH/2} ${X(i+1)-30},${Y+NH/2} ${X(i+1)-2},${Y+NH/2}" fill="none" stroke="var(--muted)" stroke-width="1.4" marker-end="url(#wa)"/>`}
+  L.forEach((l,i)=>{
+    const meta=WSMETA.layer_types[l.type]||{title:l.type};
+    const sub=l.type==="circuit"?`${l.params.units} units`:l.type==="pathway"?esc(l.params.pathway):l.type==="input"?`${l.params.channels} in`:l.type==="readout"?`${l.params.outputs} out`:l.type==="linear"?`→ ${l.params.out||"?"}`:"";
+    const rec=l.type==="circuit"||l.type==="pathway";
+    if(rec) g+=`<path d="M${X(i)+NW/2-16},${Y} C${X(i)+NW/2-32},${Y-46} ${X(i)+NW/2+32},${Y-46} ${X(i)+NW/2+16},${Y}" fill="none" stroke="var(--muted)" stroke-width="1.3" marker-end="url(#wa)"/>`;
+    g+=`<g class="node ${WSSEL===l.id?"sel":""}" data-id="${l.id}" transform="translate(${X(i)},${Y})" tabindex="0"><rect width="${NW}" height="${NH}" rx="10"/>
+      <text x="${NW/2}" y="26" font-size="12.5" font-weight="700" text-anchor="middle">${esc(meta.title)}</text>
+      <text x="${NW/2}" y="44" font-size="10.5" text-anchor="middle" opacity=".7">${esc(sub)}</text></g>`;
+  });
+  svg.innerHTML=g;
+  svg.querySelectorAll(".node").forEach(el=>{el.onclick=()=>{WSSEL=el.dataset.id;drawWs()};el.onkeydown=e=>{if(e.key==="Enter"){WSSEL=el.dataset.id;drawWs()}}});
+  inspectWs();
+}
+function inspectWs(){
+  const w=WSCUR, l=w.layers.find(x=>x.id===WSSEL)||w.layers[0], meta=WSMETA.layer_types[l.type];
+  const box=document.querySelector(".wsinsp");
+  let f="";
+  for(const [name,kind,a,b] of (meta.fields||[])){
+    const v=l.params[name];
+    if(kind==="int"||kind==="float") f+=`<label>${name.replace(/_/g," ")}<input data-f="${name}" type="number" step="${kind==="int"?1:"any"}" min="${a}" max="${b}" value="${v??""}"></label>`;
+    else if(kind==="choice") f+=`<label>${name}<select data-f="${name}">${a.map(o=>`<option ${o===v?"selected":""}>${esc(o)}</option>`).join("")}</select></label>`;
+    else if(kind==="vector") f+=`<label>${name} (comma separated)<input data-f="${name}" data-vec="1" value="${(v||[]).join(", ")}"></label>`;
+  }
+  if(l.type==="pathway"){
+    const sp=(WSMETA.pathways.find(p=>p.id===l.params.pathway)||{species:[]}).species;
+    const sel=(key)=>`<label>${key} species<select data-f="${key}" data-multi="1" multiple size="6">${sp.map(x=>`<option ${(l.params[key]||[]).includes(x)?"selected":""}>${esc(x)}</option>`).join("")}</select></label>`;
+    f+=sel("inputs")+sel("outputs");
+  }
+  box.innerHTML=`<h3 style="margin:0 0 4px">${esc(meta.title)} <span class="note">${esc(l.type)}</span></h3>
+    <div class="eq">${esc(meta.eq)}</div><div class="fields">${f||'<p class="note">This layer has no settings.</p>'}</div>`;
+  box.querySelectorAll("[data-f]").forEach(el=>el.onchange=async()=>{
+    const key=el.dataset.f;
+    let val;
+    if(el.dataset.multi) val=[...el.selectedOptions].map(o=>o.value);
+    else if(el.dataset.vec) val=nums(el.value);
+    else if(el.tagName==="SELECT") val=el.value;
+    else val=parseFloat(el.value);
+    const layers=WSCUR.layers.map(x=>x.id===l.id?{...x,params:{...x.params,[key]:val}}:x);
+    if(l.type==="pathway"&&key==="pathway"){const L2=layers.find(x=>x.id===l.id);delete L2.params.inputs;delete L2.params.outputs}
+    if(["units","channels","outputs","out","constraint","self_excitation","coupling"].includes(key)){
+      const L2=layers.find(x=>x.id===l.id); L2.weights={};
+    }
+    await saveWs({layers}); openWorkspace(WSCUR.id);
+  });
+  const viz=document.querySelector(".wsviz");
+  const Wt=l.weights||{};
+  viz.innerHTML=Object.entries(Wt).filter(([k,v])=>Array.isArray(v)&&Array.isArray(v[0])).map(([k,M])=>heatmap(k,M)).join("")||
+    (Object.entries(Wt).filter(([k,v])=>Array.isArray(v)).length?vectorBars(Object.fromEntries(Object.entries(Wt).filter(([k,v])=>Array.isArray(v)&&!Array.isArray(v[0])))):`<p class="note">No weights in this layer.</p>`);
+}
+function buildWaves(nin){
+  const names=(WSCUR.input_names||[]).length===nin?WSCUR.input_names:[...Array(nin)].map((_,i)=>`channel ${i+1}`);
+  $("#wswaves").innerHTML=names.map((nm,i)=>`<label>${esc(nm)}<select data-w="kind" data-i="${i}"><option>pulse</option><option>step</option><option>constant</option><option>train</option><option>ramp</option></select></label>
+    <label>strength<input type="number" step="any" data-w="amp" data-i="${i}" value="1"></label>`).join("");
+}
+async function runWs(){
+  const nin=WSCUR.layers[0].params.channels||1, out=document.querySelector(".wsout");
+  const chans=[...Array(nin)].map((_,i)=>({kind:document.querySelector(`[data-w="kind"][data-i="${i}"]`).value,
+    amp:parseFloat(document.querySelector(`[data-w="amp"][data-i="${i}"]`).value)||0,start:10,width:30,period:60}));
+  out.innerHTML=`<p class="note">Running…</p>`;
+  let d;try{d=await api(`/api/workspaces/${WSCUR.id}/simulate`,{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({length:parseInt($("#wslen").value)||150,channels:chans})})}catch(e){out.innerHTML=`<p class="err">${esc(e.message)}</p>`;return}
+  const T=d.output[0].length,w=900,h=d.trace.length?360:240,p=44,X=t=>p+(w-10-p)*t/(T-1);
+  const imax=Math.max(...d.inputs.flat().map(Math.abs),1e-9),omin=Math.min(...d.output.flat()),omax=Math.max(...d.output.flat());
+  const top=v=>60-42*v/imax, mid=v=>170-70*(v-omin)/((omax-omin)||1);
+  let g=`<text x="${p}" y="14" font-size="11" fill="var(--muted)">Inputs</text>`;
+  d.inputs.forEach((row,i)=>g+=`<polyline fill="none" stroke="${wellColor(i+3)}" stroke-width="1.4" points="${row.map((v,t)=>X(t).toFixed(1)+","+top(v).toFixed(1)).join(" ")}"/>`);
+  g+=`<text x="${p}" y="104" font-size="11" fill="var(--muted)">Output: ${esc((d.output_names||[]).join(", "))}</text>`;
+  d.output.forEach((row,i)=>g+=`<polyline fill="none" stroke="${armColor("coop")}" stroke-opacity="${1-i*0.2}" stroke-width="1.8" points="${row.map((v,t)=>X(t).toFixed(1)+","+mid(v).toFixed(1)).join(" ")}"/>`);
+  let legend="";
+  if(d.trace.length){
+    const S=d.species,tr=d.trace,mx=Math.max(...tr.flat(),1e-9);
+    const keep=S.map((s,i)=>[s,i,Math.max(...tr.map(r=>r[i]))]).sort((a,b)=>b[2]-a[2]).slice(0,8);
+    g+=`<text x="${p}" y="212" font-size="11" fill="var(--muted)">Inside the pathway, the eight busiest species</text>`;
+    keep.forEach(([s,i],k)=>{g+=`<polyline fill="none" stroke="${wellColor(k)}" stroke-width="1.5" points="${tr.map((r,t)=>X(t*(T-1)/(tr.length-1)).toFixed(1)+","+(340-110*r[i]/mx).toFixed(1)).join(" ")}"/>`;
+      legend+=`<span><i class="dot" style="background:${wellColor(k)}"></i> ${esc(s)}</span>`});
+  }
+  out.innerHTML=`<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Model run">${g}</svg>`+(legend?`<div class="legend">${legend}</div>`:"");
+}
+async function loadWsCode(id){const d=await api(`/api/workspaces/${id}/code`);const el=$("#wscode");if(el)el.textContent=d.code}
+
+async function listPathways(){
+  const ps=await api("/api/pathways");
+  $("#pwlist").innerHTML=ps.map(p=>`<li><button data-id="${p.id}" aria-current="${p.id===PWCUR}"><span class="nm">${esc(p.name)}</span><span class="sub">${p.species} species, ${p.reactions} reactions</span></button></li>`).join("");
+  document.querySelectorAll("#pwlist button").forEach(b=>b.onclick=()=>openPathway(b.dataset.id));
+}
+async function openPathway(pid){
+  PWCUR=pid; listPathways();
+  const a=await api("/api/pathways/"+pid);
+  const st=a.structure;
+  $("#main").innerHTML=`<div class="runhead"><div><h2>${esc(a.name)}</h2><p class="note">${esc(a.description)}</p></div></div>
+    <div class="report"><h3 style="margin-top:0">What the structure says</h3>${a.notes.map(n=>`<p>${esc(n)}</p>`).join("")}
+      <p class="note">Stoichiometry follows ${esc(a.reference)}. Rate constants are illustrative, not measured, so structure is exact while timings are not.</p></div>
+    <h3 class="sub">Structure</h3>
+    <div>${[["species",a.species.length],["reactions",a.reactions.length],["complexes",st.complexes],["linkage classes",st.linkage_classes],["stoichiometric rank",st.rank],["deficiency",st.deficiency],["weakly reversible",st.weakly_reversible?"yes":"no"],["sign-consistent",a.signs.consistent?"yes":"no"]].map(([k,v])=>`<span class="pill">${k}: <b>${v}</b></span>`).join("")}</div>
+    ${a.conservation.length?`<p class="note">Conserved pools: ${a.conservation.map(l=>l.map(([s,c])=>c>1?`${c} ${s}`:s).join(" + ")).join("; ")}.</p>`:""}
+    ${a.signs.conflicts.length?`<p class="note">Sign conflicts (negative feedback): ${a.signs.conflicts.map(c=>c[0]+"→"+c[1]).join(", ")}${a.signs.ambiguous.length?`; ambiguous pairs: ${a.signs.ambiguous.map(c=>c[0]+"→"+c[1]).join(", ")}`:""}.</p>`:""}
+    <h3 class="sub">Reactions</h3>
+    <div class="tablewrap"><table><thead><tr><th>Enzyme</th><th>Reaction</th><th>Regulation</th><th>Knock down</th></tr></thead><tbody>
+      ${a.reactions.map(r=>`<tr><td>${esc(r.enzyme)}</td><td style="text-align:left;white-space:normal">${esc(Object.entries(r.substrates).map(([s,c])=>c>1?c+" "+s:s).join(" + ")||"∅")} ${r.reversible?"⇌":"→"} ${esc(Object.entries(r.products).map(([s,c])=>c>1?c+" "+s:s).join(" + ")||"∅")}</td>
+        <td style="text-align:left">${r.regulators.map(g=>`${esc(g.species)} ${g.effect}s`).join(", ")||"—"}</td>
+        <td><button class="btn ghost kd" data-r="${r.id}">to 20%</button></td></tr>`).join("")}
+    </tbody></table></div>
+    <h3 class="sub">Simulation</h3><p class="note" id="pwnote">Time courses from a standard starting state. Knock an enzyme down to see what the pathway does without it.</p>
+    <div class="modelhead"><button class="btn ghost" id="pwrun">Run normally</button></div><figure class="chart pwout"></figure>`;
+  document.querySelectorAll(".kd").forEach(b=>b.onclick=()=>runPathway(pid,b.dataset.r));
+  $("#pwrun").onclick=()=>runPathway(pid,null);
+  runPathway(pid,null);
+}
+async function runPathway(pid,kd){
+  const out=document.querySelector(".pwout"); out.innerHTML=`<p class="note">Simulating…</p>`;
+  const d=await api(`/api/pathways/${pid}/simulate?steps=2500${kd?`&knockdown=${kd}`:""}`);
+  const S=d.species,tr=d.trace,mx=Math.max(...tr.flat(),1e-9),w=900,h=300,p=46;
+  const keep=S.map((s,i)=>[s,i,Math.max(...tr.map(r=>r[i]))]).sort((a,b)=>b[2]-a[2]).slice(0,10);
+  const X=t=>p+(w-10-p)*t/(tr.length-1),Y=v=>h-40-(h-70)*v/mx;
+  let g=axes(w,h,p,tr.length,0,mx,"time",v=>v.toFixed(2)),legend="";
+  keep.forEach(([s,i],k)=>{g+=`<polyline fill="none" stroke="${wellColor(k)}" stroke-width="1.7" points="${tr.map((r,t)=>X(t).toFixed(1)+","+Y(r[i]).toFixed(1)).join(" ")}"><title>${esc(s)}</title></polyline>`;
+    legend+=`<span><i class="dot" style="background:${wellColor(k)}"></i> ${esc(s)}</span>`});
+  $("#pwnote").textContent=(kd?`Enzyme ${kd} knocked down to 20% of its activity. `:"Normal pathway. ")+(d.steady?"The pathway reached a steady state.":"The pathway had not settled by the end of the run.");
+  out.innerHTML=`<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Pathway time courses">${g}</svg><div class="legend">${legend}</div>
+    <p class="note">Fluxes at the end: ${Object.entries(d.flux).map(([k,v])=>`${esc(k)} ${v}`).join(", ")}.</p>`;
+}
+
 init().catch(e=>{$("#main").innerHTML=`<div class="empty"><h2>Server not reachable</h2><p>${esc(e.message)}. Check that the service is running, then reload.</p></div>`});
 </script>
 </body>

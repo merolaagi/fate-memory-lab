@@ -11,6 +11,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
@@ -20,6 +21,9 @@ from typing import Literal
 
 from .engine import ARMS, DEFAULTS, MEMBRANES, TASKS, Cancelled, run_job
 from .explain import LABEL, explain
+from .pathways import PATHWAYS, analyse, simulate_pathway
+from .workspace import (LAYER_TYPES, code_workspace, compile_workspace, default_workspace, from_model,
+                        from_pathway, new_layer, run_workspace, waveform)
 from .model import THERAPY, code_numpy, code_torch, graph, probe, reachability, simulate, therapy
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -389,3 +393,182 @@ def model_reach(rid: str, task: str, arm: str | None = None, rep: int | None = N
     run = load(rid)
     r, _ = _pick(run, task, arm, rep)
     return reachability(r["model"], task)
+
+
+WS = Path(os.environ.get("FML_WORKSPACES", ROOT / "data" / "workspaces"))
+WS.mkdir(parents=True, exist_ok=True)
+
+
+class WorkspaceCreate(BaseModel):
+    name: str = ""
+    pathway: str | None = None
+    run_id: str | None = None
+    task: str | None = None
+    arm: str | None = None
+    rep: int | None = None
+
+
+class Waveform(BaseModel):
+    kind: str = "pulse"
+    amp: float = 1.0
+    start: int = 10
+    width: int = 20
+    period: int = 60
+
+
+class SimRequest(BaseModel):
+    length: int = Field(120, ge=10, le=2000)
+    channels: list[Waveform] = Field(default_factory=list)
+
+
+@app.get("/api/pathways")
+def list_pathways():
+    return [{"id": p["id"], "name": p["name"], "description": p["description"], "species": len(p["species"]),
+             "reactions": len(p["reactions"])} for p in PATHWAYS.values()]
+
+
+@app.get("/api/pathways/{pid}")
+def get_pathway(pid: str):
+    if pid not in PATHWAYS:
+        raise HTTPException(404, "No such pathway")
+    return analyse(PATHWAYS[pid])
+
+
+@app.get("/api/pathways/{pid}/simulate")
+def sim_pathway(pid: str, steps: int = 2500, knockdown: str | None = None, factor: float = 0.2):
+    if pid not in PATHWAYS:
+        raise HTTPException(404, "No such pathway")
+    p = PATHWAYS[pid]
+    scale = None
+    if knockdown:
+        scale = [factor if r["id"] == knockdown else 1.0 for r in p["reactions"]]
+        if all(x == 1.0 for x in scale):
+            raise HTTPException(404, "No such reaction")
+    out = simulate_pathway(p, steps=max(50, min(steps, 4000)), enzyme_scale=scale)
+    out["knockdown"] = knockdown
+    return out
+
+
+def ws_path(wid):
+    return WS / f"{wid}.json"
+
+
+def load_ws(wid):
+    p = ws_path(wid)
+    if not p.exists() or "/" in wid:
+        raise HTTPException(404, "Workspace not found")
+    return json.loads(p.read_text())
+
+
+def save_ws(w):
+    ws_path(w["id"]).write_text(json.dumps(w))
+
+
+@app.get("/api/workspaces")
+def list_workspaces():
+    out = []
+    for p in sorted(WS.glob("*.json"), reverse=True):
+        w = json.loads(p.read_text())
+        out.append({"id": w["id"], "name": w["name"], "created": w.get("created", 0),
+                    "layers": [l["type"] for l in w["layers"]]})
+    return out
+
+
+@app.get("/api/workspaces/meta")
+def workspace_meta():
+    return {"layer_types": LAYER_TYPES, "pathways": [{"id": p["id"], "name": p["name"], "species": p["species"]}
+                                                     for p in PATHWAYS.values()]}
+
+
+@app.post("/api/workspaces")
+def create_workspace(req: WorkspaceCreate):
+    if req.pathway:
+        w = from_pathway(req.pathway, req.name or None)
+    elif req.run_id and req.task:
+        run = load(req.run_id)
+        r, _ = _pick(run, req.task, req.arm, req.rep)
+        w = from_model(r["model"], req.task, req.name or f"{req.task} model from run {run['id']}")
+    else:
+        w = default_workspace(req.name or "New model")
+    w["id"] = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
+    w["created"] = time.time()
+    w["compile"] = compile_workspace(w)
+    save_ws(w)
+    return w
+
+
+@app.get("/api/workspaces/{wid}")
+def get_workspace(wid: str):
+    return load_ws(wid)
+
+
+@app.put("/api/workspaces/{wid}")
+def put_workspace(wid: str, body: dict):
+    w = load_ws(wid)
+    w["name"] = body.get("name", w["name"])
+    if "layers" in body:
+        w["layers"] = body["layers"]
+    for key in ("input_names", "output_names"):
+        if key in body:
+            w[key] = body[key]
+    w["compile"] = compile_workspace(w)
+    save_ws(w)
+    return w
+
+
+@app.post("/api/workspaces/{wid}/layers")
+def add_layer(wid: str, body: dict):
+    w = load_ws(wid)
+    kind = body.get("type")
+    if kind not in LAYER_TYPES:
+        raise HTTPException(400, "Unknown layer type")
+    at = int(body.get("after", len(w["layers"]) - 1))
+    w["layers"].insert(max(0, min(at + 1, len(w["layers"]))), new_layer(kind))
+    w["compile"] = compile_workspace(w)
+    save_ws(w)
+    return w
+
+
+@app.delete("/api/workspaces/{wid}/layers/{lid}")
+def del_layer(wid: str, lid: str):
+    w = load_ws(wid)
+    w["layers"] = [l for l in w["layers"] if l["id"] != lid]
+    w["compile"] = compile_workspace(w)
+    save_ws(w)
+    return w
+
+
+@app.delete("/api/workspaces/{wid}")
+def delete_workspace(wid: str):
+    load_ws(wid)
+    ws_path(wid).unlink(missing_ok=True)
+    return {"deleted": wid}
+
+
+@app.post("/api/workspaces/{wid}/simulate")
+def simulate_workspace(wid: str, req: SimRequest):
+    w = load_ws(wid)
+    c = w["compile"] = compile_workspace(w)
+    save_ws(w)
+    if c["errors"]:
+        raise HTTPException(409, "Fix the model first: " + " ".join(c["errors"]))
+    nin = int(w["layers"][0]["params"].get("channels", 1))
+    waves = (req.channels + [Waveform() for _ in range(nin)])[:nin]
+    u = np.stack([waveform(v.kind, req.length, v.amp, v.start, v.width, v.period) for v in waves], axis=-1)[:, None, :]
+    out, traces = run_workspace(w, u)
+    pw = next((l for l in w["layers"] if l["type"] == "pathway"), None)
+    species = PATHWAYS[pw["params"]["pathway"]]["species"] if pw else []
+    return {"inputs": np.round(u[:, 0, :], 4).T.tolist(), "output": np.round(out[:, 0, :], 4).T.tolist(),
+            "species": species, "trace": traces.get(pw["id"], []) if pw else [],
+            "input_names": w.get("input_names", [f"channel {i + 1}" for i in range(nin)]),
+            "output_names": w.get("output_names", [f"output {i + 1}" for i in range(out.shape[-1])])}
+
+
+@app.get("/api/workspaces/{wid}/code")
+def workspace_code(wid: str, download: bool = False):
+    w = load_ws(wid)
+    code = code_workspace(w)
+    if download:
+        return Response(code, media_type="text/x-python",
+                        headers={"Content-Disposition": f'attachment; filename="fml-workspace-{wid}.py"'})
+    return {"code": code}
