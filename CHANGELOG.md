@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.0
+- Two new arms drawn from what real pathways actually satisfy: monotone backbone (sign-consistent wiring plus a few negative feedback edges) and conserved pools (unit groups whose totals never change)
+- Both at matched parameter count, with the number of feedback edges and the pool size as settings
+- Deeper pathway analysis: backbone monotonicity with regulation stripped out, a numerical scan for concentration-robust species, multistability tested within the same conserved pools, and flux control coefficients per enzyme
+- Control coefficients are flagged as unreliable when the pathway is multistable
+- Each pathway now carries real throughput, so fluxes and control coefficients are meaningful; the coefficients sum to about 1 as the theory requires
+
 ## 0.8.0
 - Three tabs: Runs, Models and Pathways
 - Models: an editable workspace. Build a model layer by layer on a canvas, starting blank or from a pathway or a trained circuit; edit, insert and delete layers; run it on inputs you choose; read and download the generated NumPy code

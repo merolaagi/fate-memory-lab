@@ -21,7 +21,7 @@ from typing import Literal
 
 from .engine import ARMS, DEFAULTS, MEMBRANES, TASKS, Cancelled, run_job
 from .explain import LABEL, explain
-from .pathways import PATHWAYS, analyse, simulate_pathway
+from .pathways import PATHWAYS, analyse, deeper, simulate_pathway
 from .workspace import (LAYER_TYPES, code_workspace, compile_workspace, default_workspace, from_model,
                         from_pathway, new_layer, run_workspace, waveform)
 from .model import THERAPY, code_numpy, code_torch, graph, probe, reachability, simulate, therapy
@@ -57,6 +57,8 @@ class RunConfig(BaseModel):
     inhibitor: list[float] = Field(default_factory=lambda: list(DEFAULTS["inhibitor"]))
     membrane: Literal["direct", "transporter", "gated"] = DEFAULTS["membrane"]
     seed: int = DEFAULTS["seed"]
+    feedback_edges: int = Field(DEFAULTS["feedback_edges"], ge=0, le=20)
+    pool_size: int = Field(DEFAULTS["pool_size"], ge=2, le=16)
     repeats: int = Field(DEFAULTS["repeats"], ge=1, le=10)
 
 
@@ -432,6 +434,13 @@ def get_pathway(pid: str):
     if pid not in PATHWAYS:
         raise HTTPException(404, "No such pathway")
     return analyse(PATHWAYS[pid])
+
+
+@app.get("/api/pathways/{pid}/deeper")
+def pathway_deeper(pid: str):
+    if pid not in PATHWAYS:
+        raise HTTPException(404, "No such pathway")
+    return deeper(PATHWAYS[pid])
 
 
 @app.get("/api/pathways/{pid}/simulate")

@@ -30,6 +30,8 @@ so any difference in the results comes from the one structural rule each arm fol
 | **One cycle flipped** | Identical, except one connection's sign is reversed, creating exactly one negative cycle | The settling guarantee no longer holds |
 | **Contraction** | Weights are scaled down so the network always pulls toward a single point | Always settles, but only ever to one state, so it cannot remember |
 | **Unconstrained** | No rule at all | No guarantee either way |
+| **Monotone backbone** | Sign-consistent wiring plus a few negative feedback edges (how many is a setting) | The pattern real pathways show: a monotone skeleton with a handful of regulatory loops. No guarantee, but far closer to one than free wiring |
+| **Conserved pools** | Free wiring, but units grouped into pools whose totals never change | The circuit analogue of a conserved quantity such as ATP + ADP, the other property real networks have |
 
 The *one cycle flipped* arm is the key control. It differs from the sign-consistent arm by a single sign, so if the
 two behave differently, that one broken condition is the reason.
@@ -111,6 +113,15 @@ For each pathway the app reports:
 - **Sign-consistency**: whether the influence graph has negative feedback cycles. If it has none the network is
   monotone, the same structure the bench's sign-consistent arm enforces, and it cannot sustain oscillations. If it has
   conflicts, they are listed by name, so you can see exactly which regulation breaks monotonicity.
+- **Deeper structure**, measured on demand:
+  - *Backbone monotonicity*: whether the pathway becomes sign-consistent once the allosteric regulation is stripped
+    out, which separates "the wiring is monotone and regulation breaks it" from "it was never monotone".
+  - *Concentration robustness*: which species hold their steady level when every free pool is scaled by 0.7 and 1.4.
+    These are candidates for absolute concentration robustness. It is a numerical test, not a proof.
+  - *Multistability*: how many distinct steady states the pathway reaches from different starting points **within the
+    same conserved pools**, so a difference means genuine multistability rather than a different amount of material.
+  - *Flux control coefficients*: how much the output flux moves when each enzyme is nudged up and down. This is the
+    measured drug-target ranking, and the coefficients should sum to about 1, which is a useful check on the numerics.
 - **Time courses**, with a one-click **knockdown** of any enzyme to 20% of its activity, the in-model equivalent of an
   inhibitor drug.
 

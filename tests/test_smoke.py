@@ -191,3 +191,33 @@ def test_workspace_edit_simulate_export(tmp_path, monkeypatch):
         code = client.get(f"/api/workspaces/{wid}/code").json()["code"]
         compile(code, "ws", "exec")
         assert client.delete(f"/api/workspaces/{wid}").status_code == 200
+
+
+def test_new_arms_match_params_and_conserve_pools():
+    import numpy as np
+
+    from app.engine import pool_projection
+
+    params = set()
+    for arm in ("coop", "feedback", "pool", "free"):
+        r = run_job("resistance", arm, tiny())
+        params.add(r["params"])
+        if arm == "feedback":
+            assert r["negative_edges"] == tiny()["feedback_edges"]
+        if arm == "pool":
+            assert r["model"]["pool_groups"]
+    assert len(params) == 1
+    proj, groups = pool_projection(8, 4)
+    h = np.random.default_rng(0).random((3, 8))
+    out = proj(h)
+    for g in groups:
+        assert abs(out[:, g].sum(axis=1) - len(g) * 0.5).max() < 1e-6
+
+
+def test_pathway_deeper_analysis():
+    from app.pathways import PATHWAYS, deeper
+
+    d = deeper(PATHWAYS["glycolysis"])
+    assert d["notes"] and d["control"]["coefficients"]
+    assert abs(d["control"]["sum"]) > 0.2
+    assert set(d["acr"]) == {"robust", "sensitive", "factors"}

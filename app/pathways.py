@@ -50,28 +50,36 @@ _p("glycolysis", "Glycolysis (Embden-Meyerhof-Parnas)",
 _p("fermentation", "Lactate fermentation",
    "The anaerobic branch: lactate dehydrogenase regenerates NAD from NADH so glycolysis can keep running "
    "without oxygen. This is the Warburg-style branch point in tumour metabolism.",
-   ["Pyr", "Lac", "NAD", "NADH", "H"], ["H"],
+   ["Pyr", "Lac", "NAD", "NADH", "H"], ["H", "Pyr"],
    [R("ldh", "Lactate dehydrogenase", "LDH", {"Pyr": 1, "NADH": 1}, {"Lac": 1, "NAD": 1}, kcat=2.0, km=0.3, reversible=True),
-    R("mct", "Lactate export", "MCT", {"Lac": 1}, {}, kcat=1.0, km=0.6)],
+    R("mct", "Lactate export", "MCT", {"Lac": 1}, {}, kcat=1.0, km=0.6),
+    R("supply", "NADH supply from glycolysis (GAPDH upstream)", "GAPDH", {"NAD": 1}, {"NADH": 1}, kcat=0.6, km=0.4)],
    "Standard anaerobic glycolysis branch")
 
 _p("ppp", "Pentose phosphate pathway (oxidative branch)",
    "The branch that makes NADPH for antioxidant defence and biosynthesis. Cells shifting flux here is one "
    "known route to surviving oxidative stress and some drugs.",
-   ["G6P", "6PGL", "6PG", "Ru5P", "CO2", "NADP", "NADPH"], ["CO2"],
+   ["G6P", "6PGL", "6PG", "Ru5P", "CO2", "NADP", "NADPH"], ["CO2", "G6P"],
    [R("g6pd", "Glucose-6-P dehydrogenase", "G6PD", {"G6P": 1, "NADP": 1}, {"6PGL": 1, "NADPH": 1}, kcat=1.5, km=0.3,
       regulators=[{"species": "NADPH", "effect": "inhibit", "k": 1.0}]),
     R("pgls", "6-phosphogluconolactonase", "PGLS", {"6PGL": 1}, {"6PG": 1}, kcat=3.0, km=0.4),
     R("pgd", "6-phosphogluconate dehydrogenase", "PGD", {"6PG": 1, "NADP": 1}, {"Ru5P": 1, "CO2": 1, "NADPH": 1},
-      kcat=1.5, km=0.3)],
+      kcat=1.5, km=0.3),
+    R("nadph_use", "NADPH consumption (biosynthesis and antioxidant defence)", "NADPH-use", {"NADPH": 1}, {"NADP": 1},
+      kcat=1.0, km=0.3),
+    R("r5p_use", "Ribose-5-P consumption (nucleotide synthesis)", "R5P-use", {"Ru5P": 1}, {}, kcat=1.0, km=0.3)],
    "Berg, Tymoczko and Stryer, pentose phosphate pathway chapter")
 
 _p("tca", "Citric acid cycle (TCA)",
    "The cycle that oxidises acetyl-CoA to CO2, feeding NADH to the respiratory chain. Its conserved cycle "
    "structure makes it a good test of conservation-law analysis.",
-   ["AcCoA", "OAA", "Cit", "IsoCit", "AKG", "SucCoA", "Suc", "Fum", "Mal", "CoA", "NAD", "NADH", "CO2", "GDP", "GTP", "Pi"],
-   ["CO2", "Pi", "GDP"],
-   [R("cs", "Citrate synthase", "CS", {"AcCoA": 1, "OAA": 1}, {"Cit": 1, "CoA": 1}, kcat=1.5, km=0.3,
+   ["Pyr", "AcCoA", "OAA", "Cit", "IsoCit", "AKG", "SucCoA", "Suc", "Fum", "Mal", "CoA", "NAD", "NADH", "CO2",
+    "GDP", "GTP", "Pi"],
+   ["CO2", "Pi", "GDP", "Pyr"],
+   [R("pdh", "Pyruvate dehydrogenase (entry into the cycle)", "PDH", {"Pyr": 1, "CoA": 1, "NAD": 1},
+      {"AcCoA": 1, "NADH": 1, "CO2": 1}, kcat=1.2, km=0.3,
+      regulators=[{"species": "NADH", "effect": "inhibit", "k": 1.0}]),
+    R("cs", "Citrate synthase", "CS", {"AcCoA": 1, "OAA": 1}, {"Cit": 1, "CoA": 1}, kcat=1.5, km=0.3,
       regulators=[{"species": "NADH", "effect": "inhibit", "k": 1.0}]),
     R("acon", "Aconitase", "ACO", {"Cit": 1}, {"IsoCit": 1}, kcat=2.0, km=0.4, reversible=True),
     R("idh", "Isocitrate dehydrogenase", "IDH", {"IsoCit": 1, "NAD": 1}, {"AKG": 1, "NADH": 1, "CO2": 1}, kcat=1.2, km=0.3,
@@ -81,7 +89,9 @@ _p("tca", "Citric acid cycle (TCA)",
     R("scs", "Succinyl-CoA synthetase", "SCS", {"SucCoA": 1, "GDP": 1, "Pi": 1}, {"Suc": 1, "CoA": 1, "GTP": 1}, kcat=1.5, km=0.3),
     R("sdh", "Succinate dehydrogenase", "SDH", {"Suc": 1}, {"Fum": 1}, kcat=1.5, km=0.4, reversible=True),
     R("fum", "Fumarase", "FUM", {"Fum": 1}, {"Mal": 1}, kcat=2.5, km=0.4, reversible=True),
-    R("mdh", "Malate dehydrogenase", "MDH", {"Mal": 1, "NAD": 1}, {"OAA": 1, "NADH": 1}, kcat=1.5, km=0.4, reversible=True)],
+    R("mdh", "Malate dehydrogenase", "MDH", {"Mal": 1, "NAD": 1}, {"OAA": 1, "NADH": 1}, kcat=1.5, km=0.4, reversible=True),
+    R("etc", "NADH reoxidation (electron transport chain)", "ETC", {"NADH": 1}, {"NAD": 1}, kcat=2.0, km=0.3),
+    R("gtp_use", "GTP consumption", "GTP-use", {"GTP": 1}, {"GDP": 1}, kcat=1.5, km=0.3)],
    "Berg, Tymoczko and Stryer, citric acid cycle chapter")
 
 
@@ -325,3 +335,128 @@ def simulate_pathway(path, steps=400, dt=0.05, inputs=None, enzyme_scale=None, c
     return {"species": sp, "trace": trace, "final": np.round(c[0], 4).tolist(), "residual": round(residual, 5),
             "flux": {r["id"]: round(float(f), 4) for r, f in zip(path["reactions"], flux)},
             "steady": bool(residual < 5e-3)}
+
+
+def backbone_sign_consistency(path):
+    """Is the pathway monotone once the allosteric regulation is removed?"""
+    bare = dict(path)
+    bare["reactions"] = [dict(r, regulators=[]) for r in path["reactions"]]
+    return sign_consistency(bare)
+
+
+def acr_scan(path, factors=(0.7, 1.0, 1.4), steps=2500, tol=0.02):
+    """Species whose steady level barely moves when every free pool is scaled: candidates for
+    absolute concentration robustness."""
+    sp = path["species"]
+    finals = []
+    for f in factors:
+        c0 = initial_state(path)
+        c0 = {k: (v * f if k not in path["clamped"] else v) for k, v in c0.items()}
+        finals.append(np.array(simulate_pathway(path, steps=steps, c0=c0, record=False)["final"]))
+    F = np.stack(finals)
+    lo, hi = F.min(axis=0), F.max(axis=0)
+    spread = (hi - lo) / np.maximum(hi, 1e-6)
+    robust, sensitive = [], []
+    for i, s in enumerate(sp):
+        if s in path["clamped"] or hi[i] < 1e-3:
+            continue
+        (robust if spread[i] < tol else sensitive).append(
+            {"species": s, "spread": round(float(spread[i]), 4), "level": round(float(F[1, i]), 4)})
+    sensitive.sort(key=lambda d: -d["spread"])
+    return {"robust": robust, "sensitive": sensitive[:6], "factors": list(factors)}
+
+
+def steady_states(path, tries=8, steps=2500, seed=2, merge=0.05):
+    """Distinct steady states from different starting points *within the same conserved pools*, so that
+    differences mean multistability rather than different amounts of material."""
+    rng = np.random.default_rng(seed)
+    N = stoichiometry(path)
+    pools = conservation_laws(N, path["species"], path["clamped"])
+    base = initial_state(path)
+    ends = []
+    for k in range(tries):
+        c0 = {s: (v if s in path["clamped"] else float(np.clip(v * rng.uniform(0.2, 2.5), 1e-6, None)))
+              for s, v in base.items()}
+        for law in pools:
+            want = sum(c * base[sp] for sp, c in law)
+            have = sum(c * c0[sp] for sp, c in law)
+            if have > 1e-9:
+                for sp, _ in law:
+                    c0[sp] *= want / have
+        out = simulate_pathway(path, steps=steps, c0=c0, record=False)
+        ends.append((np.array(out["final"]), out["residual"]))
+    distinct = []
+    unsettled = 0
+    for e, res in ends:
+        if res > 5e-3:
+            unsettled += 1
+            continue
+        if not any(np.abs(e - d).max() < merge for d in distinct):
+            distinct.append(e)
+    return {"tries": tries, "distinct": len(distinct), "unsettled": unsettled}
+
+
+def control_coefficients(path, target=None, steps=2500, delta=0.15):
+    """Flux control coefficients: the fractional change in the pathway's output flux per fractional change
+    in each enzyme. This is the measured drug-target ranking."""
+    run = simulate_pathway(path, steps=steps, record=False)
+    flux = run["flux"]
+    if target is None:
+        exits = [r["id"] for r in path["reactions"] if not r["products"]]
+        target = max(exits, key=lambda k: flux[k]) if exits else max(flux, key=lambda k: flux[k])
+    base = flux[target]
+    rows = []
+    for j, r in enumerate(path["reactions"]):
+        out = []
+        for f in (1 - delta, 1 + delta):
+            scale = [f if k == j else 1.0 for k in range(len(path["reactions"]))]
+            out.append(simulate_pathway(path, steps=steps, enzyme_scale=scale, record=False)["flux"][target])
+        c = ((out[1] - out[0]) / max(abs(base), 1e-6)) / (2 * delta)
+        rows.append({"reaction": r["id"], "enzyme": r["enzyme"], "control": round(float(c), 3)})
+    rows.sort(key=lambda d: -abs(d["control"]))
+    name = next(r["enzyme"] for r in path["reactions"] if r["id"] == target)
+    return {"target": target, "target_name": name, "base": round(float(base), 4), "coefficients": rows,
+            "sum": round(float(sum(x["control"] for x in rows)), 3)}
+
+
+def deeper(path):
+    bb = backbone_sign_consistency(path)
+    acr = acr_scan(path)
+    ss = steady_states(path)
+    cc = control_coefficients(path)
+    notes = []
+    full = sign_consistency(path)
+    if bb["consistent"] and not full["consistent"]:
+        notes.append("Strip the allosteric regulation and the pathway becomes sign-consistent, so its backbone is "
+                     "monotone and the regulation is what breaks it. That is the weaker property real pathways share: "
+                     "a monotone skeleton plus a handful of feedback loops. The bench's feedback arm enforces exactly this.")
+    elif bb["consistent"]:
+        notes.append("The pathway is sign-consistent with or without its regulation, so it is monotone as it stands.")
+    else:
+        notes.append("Even with the regulation removed, the reaction wiring itself is not sign-consistent, so this "
+                     "pathway is not monotone at any level.")
+    if acr["robust"]:
+        notes.append("Species that held their level when every free pool was scaled by 0.7 and 1.4: "
+                     + ", ".join(d["species"] for d in acr["robust"][:8])
+                     + ". These are candidates for absolute concentration robustness, where the steady level does not "
+                       "depend on how much material there is. This is a numerical test, not a proof.")
+    else:
+        notes.append("No species held its level when the pools were scaled, so nothing here looks concentration-robust.")
+    if ss["distinct"] > 1:
+        notes.append(f"From {ss['tries']} different starting points the pathway settled into {ss['distinct']} distinct "
+                     "steady states, so it is multistable: where it starts decides where it ends.")
+    elif ss["unsettled"]:
+        notes.append(f"{ss['unsettled']} of {ss['tries']} starting points had not settled by the end of the run.")
+    else:
+        notes.append("Every starting point settled to the same steady state, so no multistability showed up here.")
+    if ss["distinct"] > 1:
+        notes.append("Because the pathway is multistable, treat the control coefficients below with care: a small "
+                     "change in an enzyme can tip it into a different steady state, which shows up as a huge coefficient.")
+    top = cc["coefficients"][0] if cc["coefficients"] else None
+    if top:
+        notes.append(f"Control over the pathway's output flux ({cc['target_name']}) sits mostly with {top['enzyme']} "
+                     f"(flux control coefficient {top['control']}; the coefficients sum to {cc['sum']}, and for a "
+                     "pathway at steady state the sum should be close to 1). The enzyme with most control is the one "
+                     "worth inhibiting, and the ones near zero are the ones a drug would barely move. These are "
+                     "measured here, and depend on the illustrative rate constants.")
+    return {"backbone": bb, "acr": acr, "steady_states": ss, "control": cc, "notes": notes}

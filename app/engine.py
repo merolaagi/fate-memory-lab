@@ -6,6 +6,10 @@ Arms (matched parameter count, identical starting weights):
   broken    same with one off-diagonal sign flipped -> exactly one negative cycle
   contract  W = (3.6 / ||V||_F) V                  contraction -> unique equilibrium
   free      W = V                                  unconstrained
+  feedback  sign-consistent backbone with a few negative feedback edges, the pattern real metabolic
+            pathways show: monotone wiring plus a handful of regulatory loops that break it
+  pool      unconstrained wiring, but units are grouped into conserved pools whose totals never change,
+            the circuit analogue of conserved quantities like ATP + ADP
 
 Tasks:
   flipflop  3 channels, output = sign of last pulse on each channel
@@ -44,7 +48,7 @@ import autograd.numpy as np
 from autograd import grad
 import numpy as onp
 
-ARMS = ["coop", "broken", "contract", "free"]
+ARMS = ["coop", "broken", "contract", "free", "feedback", "pool"]
 TASKS = {
     "flipflop": {"nin": 3, "nout": 3},
     "xor": {"nin": 2, "nout": 1},
@@ -78,6 +82,8 @@ DEFAULTS = {
     "membrane": "direct",
     "seed": 0,
     "repeats": 3,
+    "feedback_edges": 3,
+    "pool_size": 4,
 }
 
 
@@ -93,13 +99,34 @@ def softplus(z):
     return np.log1p(np.exp(-np.abs(z))) + np.maximum(z, 0.0)
 
 
-def sign_matrices(n, seed):
+def sign_matrices(n, seed, feedback_edges=3):
     r = onp.random.default_rng(seed)
     s = r.choice([-1.0, 1.0], size=n)
     coop = onp.outer(s, s)
     broken = coop.copy()
     broken[0, 1] *= -1.0
-    return coop, broken, s
+    fb = coop.copy()
+    off = [(i, j) for i in range(n) for j in range(n) if i != j]
+    for k in r.permutation(len(off))[: max(0, int(feedback_edges))]:
+        i, j = off[k]
+        fb[i, j] *= -1.0
+    return coop, broken, s, fb
+
+
+def pool_projection(n, size, h0=0.5):
+    """Group units into pools whose totals never change, the circuit analogue of a conserved quantity."""
+    groups = [list(range(i, min(i + int(max(1, size)), n))) for i in range(0, n, int(max(1, size)))]
+    M = onp.zeros((len(groups), n))
+    for g, idx in enumerate(groups):
+        M[g, idx] = 1.0
+    totals = onp.array([len(g) * h0 for g in groups])
+
+    def project(h):
+        sums = h @ M.T
+        factor = totals / (sums + 1e-9)
+        return h * (factor @ M)
+
+    return project, groups
 
 
 def recurrent(arm, V, S):
@@ -107,6 +134,8 @@ def recurrent(arm, V, S):
         return S["coop"] * softplus(V)
     if arm == "broken":
         return S["broken"] * softplus(V)
+    if arm == "feedback":
+        return S["feedback"] * softplus(V)
     if arm == "contract":
         return 3.6 * V / np.sqrt(np.sum(V ** 2))
     return V
@@ -120,9 +149,9 @@ def init_params(arm, cfg, S, nin, nout):
     mag = onp.abs(r.normal(cfg["coupling"], cfg["coupling"] * 0.4 + 1e-6, (n, n)))
     onp.fill_diagonal(mag, cfg["self_excitation"])
     w0 = S["coop"] * mag
-    V = onp.log(onp.expm1(mag)) if arm in ("coop", "broken") else w0.copy()
+    V = onp.log(onp.expm1(mag)) if arm in ("coop", "broken", "feedback") else w0.copy()
     U0 = r.normal(0, 1.0, (n, ncin))
-    signed = mode == "gated" and arm in ("coop", "broken")
+    signed = mode == "gated" and arm in ("coop", "broken", "feedback")
     P = {
         "V": V,
         "U": onp.log(onp.expm1(onp.abs(U0) + 1e-3)) if signed else U0,
@@ -145,7 +174,7 @@ def channel_signs(ncin, seed):
 
 
 def make_drive(arm, S, mode):
-    signed = mode == "gated" and arm in ("coop", "broken")
+    signed = mode == "gated" and arm in ("coop", "broken", "feedback")
 
     def drive(P, x, h):
         if mode == "direct":
@@ -166,7 +195,7 @@ def make_drive(arm, S, mode):
 
 
 def effective(arm, P, S, mode):
-    signed = mode == "gated" and arm in ("coop", "broken")
+    signed = mode == "gated" and arm in ("coop", "broken", "feedback")
     out = {"U": onp.asarray(P["U"]), "b": onp.asarray(P["b"]), "R": onp.asarray(P["R"]), "c": onp.asarray(P["c"])}
     if mode != "direct":
         out["vmax"] = onp.log1p(onp.exp(P["vmax"]))
@@ -300,17 +329,19 @@ def make_batch(task, B, T, p, seed):
     return u, latched[:, :, :1] * latched[:, :, 1:2]
 
 
-def rollout(P, W, u, K, D):
+def rollout(P, W, u, K, D, proj=None):
     h = 0.5 * np.ones((u.shape[1], W.shape[0]))
     outs = []
     for t in range(u.shape[0]):
         for _ in range(K):
             h = h + DT * (-h + sig(h @ W.T + D(P, u[t], h)))
+            if proj is not None:
+                h = proj(h)
         outs.append(h @ P["R"].T + P["c"])
     return np.stack(outs)
 
 
-def rollout_perturbed(P, W, u, K, D, noise=0.0, division=0.0, inhibit=0.0, seed=11, every=40):
+def rollout_perturbed(P, W, u, K, D, noise=0.0, division=0.0, inhibit=0.0, seed=11, every=40, proj=None):
     r = onp.random.default_rng(seed)
     h = 0.5 * onp.ones((u.shape[1], W.shape[0]))
     block = onp.ones(W.shape[0])
@@ -322,27 +353,31 @@ def rollout_perturbed(P, W, u, K, D, noise=0.0, division=0.0, inhibit=0.0, seed=
             h = onp.clip(h * onp.exp(division * r.normal(size=h.shape)), 0.0, 1.0)
         for _ in range(K):
             h = h + DT * (-h + block * onp.asarray(sig(h @ W.T + D(P, u[t], h))))
+            if proj is not None:
+                h = proj(h)
             if noise > 0:
                 h = onp.clip(h + noise * onp.sqrt(DT) * r.normal(size=h.shape), 0.0, 1.0)
         outs.append(h @ P["R"].T + P["c"])
     return onp.stack(outs)
 
 
-def perturbed_accuracy(task, P, W, cfg, D, noise=0.0, division=0.0, inhibit=0.0, B=48, seed=17):
+def perturbed_accuracy(task, P, W, cfg, D, noise=0.0, division=0.0, inhibit=0.0, B=48, seed=17, proj=None):
     u, y = make_batch(task, B, cfg["test_len"], cfg["pulse_prob"], seed)
     accs = []
     for k in range(3):
-        out = rollout_perturbed(P, W, u, cfg["substeps"], D, noise, division, inhibit, seed=seed + 101 * k)
+        out = rollout_perturbed(P, W, u, cfg["substeps"], D, noise, division, inhibit, seed=seed + 101 * k, proj=proj)
         accs.append(onp.mean(onp.sign(out[10:]) == y[10:]))
     return float(onp.mean(accs))
 
 
-def landscape(P, W, runs=96, traj_runs=24, steps=600, every=20, seed=3, ids=None):
+def landscape(P, W, runs=96, traj_runs=24, steps=600, every=20, seed=3, ids=None, proj=None):
     r = onp.random.default_rng(seed)
     h = r.random((runs, W.shape[0]))
     frames = [h.copy()]
     for s in range(1, 2501):
         h = h + DT * (-h + 1.0 / (1.0 + onp.exp(-(h @ W.T + P["b"]))))
+        if proj is not None:
+            h = proj(h)
         if s <= steps and s % every == 0:
             frames.append(h.copy())
     ends = h
@@ -356,13 +391,15 @@ def landscape(P, W, runs=96, traj_runs=24, steps=600, every=20, seed=3, ids=None
     return {"traj": traj, "ends": proj(ends).tolist(), "ids": ids or [], "var": [round(float(v), 3) for v in var]}
 
 
-def settle_test(P, W, runs=96, steps=2500, tol=1e-6, seed=3):
+def settle_test(P, W, runs=96, steps=2500, tol=1e-6, seed=3, proj=None):
     r = onp.random.default_rng(seed)
     h = r.random((runs, W.shape[0]))
     speed = onp.zeros(runs)
     first_still = onp.full(runs, -1)
     for s in range(steps):
         hn = h + DT * (-h + 1.0 / (1.0 + onp.exp(-(h @ W.T + P["b"]))))
+        if proj is not None:
+            hn = proj(hn)
         step_speed = onp.abs(hn - h).max(axis=1)
         moving = step_speed >= tol
         first_still = onp.where(moving, -1, onp.where(first_still < 0, s, first_still))
@@ -385,9 +422,9 @@ def settle_test(P, W, runs=96, steps=2500, tol=1e-6, seed=3):
     return {"settled": settled, "attractors": len(table), "wells": ids, "settle_steps": settle_steps}
 
 
-def accuracy(task, P, W, cfg, T, D, B=128, seed=7):
+def accuracy(task, P, W, cfg, T, D, B=128, seed=7, proj=None):
     u, y = make_batch(task, B, T, cfg["pulse_prob"], seed)
-    out = onp.asarray(rollout(P, W, u, cfg["substeps"], D))
+    out = onp.asarray(rollout(P, W, u, cfg["substeps"], D, proj))
     return float(onp.mean(onp.sign(out[10:]) == y[10:]))
 
 
@@ -401,17 +438,18 @@ def run_job(task, arm, cfg, progress=None, rep=0):
     cfg["seed"] = cfg["seed"] + 7919 * rep
     t0 = time.time()
     tk = TASKS[task]
-    Sc, Sb, sv = sign_matrices(cfg["hidden"], cfg["seed"])
+    Sc, Sb, sv, Sf = sign_matrices(cfg["hidden"], cfg["seed"], cfg.get("feedback_edges", 3))
+    proj, pool_groups = pool_projection(cfg["hidden"], cfg.get("pool_size", 4)) if arm == "pool" else (None, [])
     mode = cfg.get("membrane", "direct")
     ncin = tk["nin"] if mode == "direct" else 2 * tk["nin"]
-    S = {"coop": Sc, "broken": Sb, "s": sv, "t": channel_signs(ncin, cfg["seed"])}
+    S = {"coop": Sc, "broken": Sb, "feedback": Sf, "s": sv, "t": channel_signs(ncin, cfg["seed"])}
     P = init_params(arm, cfg, S, tk["nin"], tk["nout"])
     K = cfg["substeps"]
     D = make_drive(arm, S, mode)
 
     def loss(P, u, y):
         W = recurrent(arm, P["V"], S)
-        return np.mean((rollout(P, W, u, K, D) - y) ** 2)
+        return np.mean((rollout(P, W, u, K, D, proj) - y) ** 2)
 
     g = grad(loss)
     m = {k: onp.zeros_like(v) for k, v in P.items()}
@@ -438,30 +476,31 @@ def run_job(task, arm, cfg, progress=None, rep=0):
         "rep": rep,
         "seed": cfg["seed"],
         "params": int(sum(v.size for v in P.values())),
-        "acc_train_len": accuracy(task, P, W, cfg, cfg["train_len"], D),
-        "acc_test_len": accuracy(task, P, W, cfg, cfg["test_len"], D),
+        "acc_train_len": accuracy(task, P, W, cfg, cfg["train_len"], D, proj=proj),
+        "acc_test_len": accuracy(task, P, W, cfg, cfg["test_len"], D, proj=proj),
         "negative_edges": negative_cycle_edges(W, S),
         "curve": curve,
     }
-    result.update(settle_test(P, W))
-    result["landscape"] = landscape(P, W, ids=result["wells"])
+    result.update(settle_test(P, W, proj=proj))
+    result["landscape"] = landscape(P, W, ids=result["wells"], proj=proj)
     drift = []
     for eps in cfg["drift"]:
         fs, accs = [], []
         for d in range(4):
             r = onp.random.default_rng(100 + d)
             Wd = W * onp.exp(eps * r.normal(size=W.shape))
-            fs.append(settle_test(P, Wd, runs=48, steps=1500)["settled"])
-            accs.append(accuracy(task, P, Wd, cfg, cfg["test_len"], D, B=48))
+            fs.append(settle_test(P, Wd, runs=48, steps=1500, proj=proj)["settled"])
+            accs.append(accuracy(task, P, Wd, cfg, cfg["test_len"], D, B=48, proj=proj))
         drift.append({"eps": eps, "settled": float(onp.mean(fs)), "acc": float(onp.mean(accs))})
     result["drift"] = drift
-    result["drift_base"] = accuracy(task, P, W, cfg, cfg["test_len"], D, B=48)
-    result["stress_base"] = perturbed_accuracy(task, P, W, cfg, D)
-    result["noise"] = [{"eps": e, "acc": perturbed_accuracy(task, P, W, cfg, D, noise=e)} for e in cfg.get("noise", [])]
-    result["division"] = [{"eps": e, "acc": perturbed_accuracy(task, P, W, cfg, D, division=e)} for e in cfg.get("division", [])]
-    result["inhibitor"] = [{"eps": e, "acc": perturbed_accuracy(task, P, W, cfg, D, inhibit=e)} for e in cfg.get("inhibitor", [])]
+    result["drift_base"] = accuracy(task, P, W, cfg, cfg["test_len"], D, B=48, proj=proj)
+    result["stress_base"] = perturbed_accuracy(task, P, W, cfg, D, proj=proj)
+    result["noise"] = [{"eps": e, "acc": perturbed_accuracy(task, P, W, cfg, D, noise=e, proj=proj)} for e in cfg.get("noise", [])]
+    result["division"] = [{"eps": e, "acc": perturbed_accuracy(task, P, W, cfg, D, division=e, proj=proj)} for e in cfg.get("division", [])]
+    result["inhibitor"] = [{"eps": e, "acc": perturbed_accuracy(task, P, W, cfg, D, inhibit=e, proj=proj)} for e in cfg.get("inhibitor", [])]
     result["membrane"] = mode
     result["uptake"] = uptake_curve(P)
     result["model"] = export_spec(arm, P, S, W, mode, cfg, tk)
+    result["model"]["pool_groups"] = pool_groups
     result["seconds"] = round(time.time() - t0, 1)
     return result

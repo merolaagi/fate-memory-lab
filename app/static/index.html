@@ -164,6 +164,8 @@ figure{margin:0}
         <label class="f">Division levels<input name="division" placeholder="0.1, 0.25, 0.5"></label>
         <label class="f">Inhibitor levels<input name="inhibitor" placeholder="0.1, 0.25, 0.5"></label>
         <label class="f">Seed<input name="seed" type="number"></label>
+        <label class="f">Feedback edges<input name="feedback_edges" type="number" min="0" max="20"></label>
+        <label class="f">Pool size<input name="pool_size" type="number" min="2" max="16"></label>
       </div>
     </details>
     <button class="btn" id="go" type="submit">Start run</button>
@@ -200,7 +202,9 @@ const ARM_INFO={
   coop:{label:"Sign-consistent",desc:"No negative cycles. Theorem guarantees settling."},
   broken:{label:"One cycle flipped",desc:"Identical except one negative cycle."},
   contract:{label:"Contraction",desc:"Unique equilibrium, so no stored state."},
-  free:{label:"Unconstrained",desc:"Any weights. No guarantee."}
+  free:{label:"Unconstrained",desc:"Any weights. No guarantee."},
+  feedback:{label:"Monotone backbone",desc:"Sign-consistent wiring with a few negative feedback edges, the pattern real metabolic pathways show."},
+  pool:{label:"Conserved pools",desc:"Free wiring, but units are grouped into pools whose totals never change, like ATP + ADP."}
 };
 const MEM_INFO={
   direct:{label:"None",desc:"Signals reach the circuit directly, as in earlier versions."},
@@ -236,7 +240,7 @@ async function init(){
   $("#tasks").innerHTML=META.tasks.map(t=>chip("tasks",t,t,d.tasks.includes(t))).join("");
   $("#arms").innerHTML=META.arms.map(a=>chip("arms",a,ARM_INFO[a].label,d.arms.includes(a),armColor(a))).join("");
   const f=$("#form");
-  for(const k of ["iters","hidden","lr","batch","train_len","test_len","pulse_prob","substeps","self_excitation","coupling","seed","repeats"]) f.elements[k].value=d[k];
+  for(const k of ["iters","hidden","lr","batch","train_len","test_len","pulse_prob","substeps","self_excitation","coupling","seed","repeats","feedback_edges","pool_size"]) f.elements[k].value=d[k];
   for(const k of ["drift","noise","division","inhibitor"]) f.elements[k].value=d[k].join(", ");
   $("#membranes").innerHTML=META.membranes.map(m=>`<label class="chip"><input type="radio" name="membrane" value="${m}" ${m===d.membrane?"checked":""}><span>${MEM_INFO[m].label}</span></label>`).join("");
   const memNote=()=>{$("#memnote").textContent=MEM_INFO[f.elements.membrane.value].desc};
@@ -252,7 +256,7 @@ $("#form").addEventListener("submit",async e=>{
   const body={name:fd.get("name")||"",tasks:fd.getAll("tasks"),arms:fd.getAll("arms"),
     drift:nums(fd.get("drift")),noise:nums(fd.get("noise")),division:nums(fd.get("division")),
     inhibitor:nums(fd.get("inhibitor")),membrane:fd.get("membrane")||"direct"};
-  for(const k of ["iters","hidden","batch","train_len","test_len","substeps","seed","repeats"]) body[k]=parseInt(fd.get(k));
+  for(const k of ["iters","hidden","batch","train_len","test_len","substeps","seed","repeats","feedback_edges","pool_size"]) body[k]=parseInt(fd.get(k));
   for(const k of ["lr","pulse_prob","self_excitation","coupling"]) body[k]=parseFloat(fd.get(k));
   $("#go").disabled=true; $("#formnote").textContent="";
   try{const run=await api("/api/runs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
@@ -763,11 +767,31 @@ async function openPathway(pid){
         <td style="text-align:left">${r.regulators.map(g=>`${esc(g.species)} ${g.effect}s`).join(", ")||"—"}</td>
         <td><button class="btn ghost kd" data-r="${r.id}">to 20%</button></td></tr>`).join("")}
     </tbody></table></div>
+    <h3 class="sub">Deeper structure</h3>
+    <p class="note">Four further questions, answered by measurement rather than assumption: is the backbone monotone once regulation is stripped out; does any species hold its level when the pools are scaled (concentration robustness); does the pathway have more than one steady state; and which enzyme actually controls the output flux.</p>
+    <button class="btn ghost" id="pwdeep">Analyse</button><div id="pwdeepbody"></div>
     <h3 class="sub">Simulation</h3><p class="note" id="pwnote">Time courses from a standard starting state. Knock an enzyme down to see what the pathway does without it.</p>
     <div class="modelhead"><button class="btn ghost" id="pwrun">Run normally</button></div><figure class="chart pwout"></figure>`;
   document.querySelectorAll(".kd").forEach(b=>b.onclick=()=>runPathway(pid,b.dataset.r));
   $("#pwrun").onclick=()=>runPathway(pid,null);
+  $("#pwdeep").onclick=()=>runDeeper(pid);
   runPathway(pid,null);
+}
+async function runDeeper(pid){
+  const box=$("#pwdeepbody"); box.innerHTML=`<p class="note">Measuring: this runs the pathway many times and takes a few seconds…</p>`;
+  let d;try{d=await api(`/api/pathways/${pid}/deeper`)}catch(e){box.innerHTML=`<p class="err">${esc(e.message)}</p>`;return}
+  const cc=d.control, mx=Math.max(...cc.coefficients.map(c=>Math.abs(c.control)),1e-9);
+  const w=660,rowh=22,p=250,h=cc.coefficients.length*rowh+30;
+  let g=`<line x1="${p}" y1="10" x2="${p}" y2="${h-16}" stroke="var(--rule)"/>`;
+  cc.coefficients.forEach((c,i)=>{const len=(w-p-30)*Math.abs(c.control)/mx*0.5;
+    g+=`<rect x="${c.control>=0?p:Math.max(p-len,110)}" y="${12+i*rowh}" width="${Math.max(len,1)}" height="${rowh-8}" rx="3" fill="${c.control>=0?"var(--coop)":"var(--broken)"}"><title>${esc(c.enzyme)}: ${c.control}</title></rect>
+      <text x="6" y="${24+i*rowh}" font-size="10.5" fill="var(--muted)">${esc(c.enzyme)}</text>
+      <text x="${(c.control>=0?p+len:p-len)+(c.control>=0?6:-6)}" y="${24+i*rowh}" font-size="10" text-anchor="${c.control>=0?"start":"end"}" fill="var(--muted)">${c.control}</text>`});
+  box.innerHTML=`<div class="report">${d.notes.map(n=>`<p>${esc(n)}</p>`).join("")}</div>
+    <div>${[["backbone monotone",d.backbone.consistent?"yes":"no"],["steady states found",d.steady_states.distinct],["starting points",d.steady_states.tries],["concentration-robust species",d.acr.robust.length]].map(([k,v])=>`<span class="pill">${k}: <b>${v}</b></span>`).join("")}</div>
+    ${d.acr.sensitive.length?`<p class="note">Most sensitive to how much material there is: ${d.acr.sensitive.map(x=>`${esc(x.species)} (${Math.round(x.spread*100)}%)`).join(", ")}.</p>`:""}
+    <figure class="chart"><figcaption>Flux control over ${esc(cc.target_name)}: how much the output flux moves when each enzyme is changed. Green raises it, red lowers it.</figcaption>
+      <svg viewBox="0 0 ${w} ${h}" style="max-width:${w}px" role="img" aria-label="Flux control coefficients">${g}</svg></figure>`;
 }
 async function runPathway(pid,kd){
   const out=document.querySelector(".pwout"); out.innerHTML=`<p class="note">Simulating…</p>`;
