@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.0
+- Reachability map for every built model: stable states, which states each input kick can reach, traps no kick can leave, and states found only by kicking
+- Escape barriers: the noise level needed to knock the cell out of each state
+- Theory check for sign-consistent circuits behind gated channels: counts kicks that move the cell against its channel's direction in the circuit's order (the theorem says none can)
+- When every input pushes one way, flags dead-end states that no schedule of that drug can ever reverse
+
 ## 0.6.0
 - New task: resistance. Sustained drug exposure makes the cell tolerant; a 25-step drug holiday resensitizes it (reversible drug tolerance)
 - Therapy search for resistance and commit models: induces the unwanted state, tries 90 schedules of dose, time on, time off and an inhibitor, and compares every result with the true rule

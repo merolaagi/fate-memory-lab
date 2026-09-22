@@ -365,3 +365,144 @@ def code_torch(spec, task, title):
           "    y, h = model(x)",
           '    print("output at last step:", y[-1, 0].tolist())', ""]
     return "\n".join(L)
+
+
+POSITIVE_ONLY = {"commit", "resistance", "antagonist"}
+
+
+def find_attractors(m, n_starts=96, steps=600, seed=3, merge=0.05, cap=10):
+    n = m.W.shape[0]
+    h0 = np.random.default_rng(seed).random((n_starts, n))
+    u = np.zeros((steps, n_starts, m.U.shape[1] if m.mode == "direct" else m.U.shape[1] // 2))
+    _, st = m.run(u, h0=h0)
+    end, prev = st[-1], st[-2]
+    still = np.abs(end - prev).max(axis=1) < 1e-5
+    centers, counts = [], []
+    for e in end[still]:
+        for i, c in enumerate(centers):
+            if np.abs(e - c).max() < merge:
+                counts[i] += 1
+                break
+        else:
+            centers.append(e)
+            counts.append(1)
+    order = np.argsort(counts)[::-1][:cap]
+    return [centers[i] for i in order], [counts[i] / n_starts for i in order], float(still.mean())
+
+
+def _nearest(states, centers, tol=0.05):
+    C = np.stack(centers)
+    d = np.abs(states[:, None, :] - C[None, :, :]).max(axis=2)
+    j = d.argmin(axis=1)
+    return np.where(d[np.arange(len(states)), j] < tol, j, -1)
+
+
+def reachability(spec, task):
+    m = CellModel(spec)
+    nin = spec["nin"]
+    centers, basins, settled = find_attractors(m)
+    if not centers:
+        return {"attractors": [], "note": "No starting state settled, so there are no attractors to map."}
+    basins = list(basins)
+    found_by_kick = [False] * len(centers)
+    signs = [1.0] if task in POSITIVE_ONLY else [1.0, -1.0]
+    kicks = [(k, sg, a, d) for k in range(nin) for sg in signs for a in (0.5, 1.5) for d in (3, 15, 40)]
+    K = len(kicks)
+    L, REST = max(k[3] for k in kicks), 400
+    for _round in range(3):
+        A = len(centers)
+        u = np.zeros((L + REST, A * K, nin))
+        h0 = np.zeros((A * K, m.W.shape[0]))
+        for i in range(A):
+            for j, (k, sg, a, d) in enumerate(kicks):
+                u[:d, i * K + j, k] = sg * a
+                h0[i * K + j] = centers[i]
+        _, st = m.run(u, h0=h0)
+        final = st[-1]
+        still = np.abs(st[-1] - st[-2]).max(axis=1) < 1e-5
+        land = _nearest(final, centers)
+        added = False
+        for f, ok, l in zip(final, still, land):
+            if l < 0 and ok and len(centers) < 16 and not any(np.abs(f - c).max() < 0.05 for c in centers):
+                centers.append(f)
+                basins.append(0.0)
+                found_by_kick.append(True)
+                added = True
+        if not added:
+            break
+    A = len(centers)
+    edges = {}
+    for i in range(A):
+        for j, (k, sg, a, d) in enumerate(kicks):
+            t = int(land[i * K + j])
+            if t == i:
+                continue
+            cost = a * d
+            key = (i, t)
+            if key not in edges or cost < edges[key]["cost"]:
+                edges[key] = {"from": i, "to": t, "channel": k, "sign": sg, "amp": a, "steps": d, "cost": cost}
+    left = [any(int(land[i * K + j]) != i for j in range(K)) for i in range(A)]
+    reach = []
+    for i in range(A):
+        seen, stack = {i}, [i]
+        while stack:
+            x = stack.pop()
+            for (f, t) in edges:
+                if f == x and t >= 0 and t not in seen:
+                    seen.add(t)
+                    stack.append(t)
+        reach.append(sorted(seen - {i}))
+    s = np.asarray(spec["orthant"])
+    theory = spec["arm"] in ("coop", "broken") and spec["membrane"] == "gated"
+    order = [[bool(np.all(s * (centers[b] - centers[a]) >= -1e-3)) and a != b for b in range(A)] for a in range(A)]
+    check = None
+    if theory:
+        t = np.asarray(spec["channel_signs"])
+        viol, tested = 0, 0
+        dirs = set()
+        for i in range(A):
+            for j, (k, sg, a, d) in enumerate(kicks):
+                c = k if sg > 0 else k + nin
+                dirn = t[c]
+                dirs.add(float(dirn))
+                diff = s * (final[i * K + j] - centers[i]) * dirn
+                tested += 1
+                viol += int(np.any(diff < -1e-3))
+        provable = []
+        if len(dirs) == 1:
+            dn = dirs.pop()
+            for i in range(A):
+                beyond = any(order[i][b] if dn > 0 else order[b][i] for b in range(A))
+                if not beyond:
+                    provable.append(i)
+            direction = "up" if dn > 0 else "down"
+        else:
+            direction = "both"
+        check = {"tested": tested, "violations": viol, "direction": direction, "provable_traps": provable,
+                 "holds": spec["arm"] == "coop"}
+    rng = np.random.default_rng(9)
+    sigmas = [0.02, 0.05, 0.1, 0.2, 0.3]
+    R = 16
+    barriers = []
+    for i in range(A):
+        esc = []
+        for sg in sigmas:
+            h = np.repeat(centers[i][None, :], R, axis=0)
+            for _ in range(150 * m.K):
+                h = h + m.dt * (-h + m._sig(h @ m.W.T + m.b))
+                h = np.clip(h + sg * np.sqrt(m.dt) * rng.normal(size=h.shape), 0, 1)
+            for _ in range(300 * m.K):
+                h = h + m.dt * (-h + m._sig(h @ m.W.T + m.b))
+            esc.append(float(np.mean(_nearest(h, centers) != i)))
+        b = next((sg for sg, e in zip(sigmas, esc) if e >= 0.5), None)
+        barriers.append({"escape": esc, "barrier": b})
+    out = np.asarray(m.R @ np.stack(centers).T + m.c[:, None]).T
+    atts = []
+    for i in range(A):
+        atts.append({"id": i, "basin": round(basins[i], 3), "height": round(float(np.mean(s * centers[i])), 4), "readout": np.round(out[i], 3).tolist(),
+                     "reaches": reach[i], "reached_from": [j for j in range(A) if i in reach[j]],
+                     "trap": len(reach[i]) == 0 and not left[i] and A > 1, "found_by_kick": found_by_kick[i], "barrier": barriers[i]["barrier"],
+                     "escape": barriers[i]["escape"]})
+    return {"attractors": atts, "edges": list(edges.values()), "kicks": K, "settled": settled, "sigmas": sigmas,
+            "order": order, "theory": check, "positive_only": task in POSITIVE_ONLY,
+            "output_names": TASK_IO[task][1]}

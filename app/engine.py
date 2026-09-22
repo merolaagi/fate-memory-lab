@@ -183,7 +183,8 @@ def export_spec(arm, P, S, W, mode, cfg, tk):
     eff = effective(arm, P, S, mode)
     spec = {"format": "fate-memory-lab/cell-model", "version": 1, "arm": arm, "membrane": mode,
             "dt": DT, "substeps": cfg["substeps"], "hidden": int(W.shape[0]), "nin": tk["nin"], "nout": tk["nout"],
-            "W": onp.round(W, 5).tolist()}
+            "W": onp.round(W, 5).tolist(), "orthant": S["s"].tolist(), "channel_signs": S["t"].tolist(),
+            "task": None}
     for k, v in eff.items():
         spec[k] = onp.round(v, 5).tolist()
     return spec

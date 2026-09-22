@@ -138,3 +138,14 @@ def test_resistance_rule_and_therapy():
     r = run_job("resistance", "coop", tiny())
     th = therapy(r["model"], "resistance")
     assert th["n"] == 90 and len(th["rows"]) == 90 and len(th["by_inhibitor"]) == 2
+
+
+def test_reachability_order_theorem_holds_for_sign_consistent_gated():
+    from app.model import reachability
+
+    r = run_job("flipflop", "coop", tiny(membrane="gated", iters=20))
+    R = reachability(r["model"], "flipflop")
+    assert R["attractors"]
+    assert R["theory"] is not None and R["theory"]["holds"]
+    assert R["theory"]["violations"] == 0
+    assert all(len(a["escape"]) == len(R["sigmas"]) for a in R["attractors"])

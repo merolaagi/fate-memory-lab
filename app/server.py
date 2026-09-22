@@ -20,7 +20,7 @@ from typing import Literal
 
 from .engine import ARMS, DEFAULTS, MEMBRANES, TASKS, Cancelled, run_job
 from .explain import LABEL, explain
-from .model import THERAPY, code_numpy, code_torch, graph, probe, simulate, therapy
+from .model import THERAPY, code_numpy, code_torch, graph, probe, reachability, simulate, therapy
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = Path(os.environ.get("FML_DATA", ROOT / "data" / "runs"))
@@ -382,3 +382,10 @@ def model_export(rid: str, task: str, kind: Literal["numpy", "torch", "json"] = 
     suffix = "numpy" if kind == "numpy" else "torch"
     return Response(code, media_type="text/x-python",
                     headers={"Content-Disposition": f'attachment; filename="{base}-{suffix}.py"'})
+
+
+@app.get("/api/runs/{rid}/model/reach")
+def model_reach(rid: str, task: str, arm: str | None = None, rep: int | None = None):
+    run = load(rid)
+    r, _ = _pick(run, task, arm, rep)
+    return reachability(r["model"], task)

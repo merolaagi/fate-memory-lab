@@ -194,6 +194,25 @@ answer together. *New example* draws another.
 - *commit*: a map of drug exposures by strength and duration, showing where the model commits against where the
   cell should. Filled cells where there is no outline are false commitments; outlines with no fill are missed ones.
 
+**Reachability map** answers where the cell can go from each of its stable states. It finds the stable states
+from 96 random starts, then kicks every state with each input channel at two strengths and three durations, lets it
+settle, and records where it lands. New states that only kicks reveal are added and kicked too. The map draws the
+states stacked by height in the circuit's order, with arrows for every move a kick can make, and marks **traps**:
+states no kick can leave. It also measures, for each state, how much noise it takes to shake the cell out half the
+time, the model's version of how deeply a cell is locked into a fate.
+
+For a sign-consistent circuit behind gated channels, the map also runs a **theory check**. Monotone systems theory
+predicts that a kick through a membrane channel can only move the cell in that channel's direction in the circuit's
+order, never the other way. The check counts how many kicks break that rule; for a sign-consistent circuit it should
+be zero. When every available input pushes the same way, the consequence is strong: no schedule of that drug, of any
+dose, timing or length, can ever return the cell to a state below where it is. States with nothing further in that
+direction are dead ends for that drug, and leaving them requires a second input that pushes the other way. This turns
+"why can't this state be treated?" into a question about wiring, answerable before any search.
+
+In testing, a sign-consistent commit model showed exactly this: the committed state was the one dead end, every
+other state could reach it, none of 96 kicks broke the order rule, and escaping commitment would require an input
+pushing the opposite way, which the drug alone cannot provide.
+
 **Therapy search** (resistance and commit models) asks the question the whole project points at: once a cell is in
 a state you don't want, what gets it out? It puts the model into its unwanted state (drug-tolerant, or committed) with
 a long strong dose, then tries 90 schedules over 120 steps: five drug doses, including none at all; three lengths of
