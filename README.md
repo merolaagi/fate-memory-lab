@@ -44,6 +44,7 @@ two behave differently, that one broken condition is the reason.
 | **dose** | Flip-flop pulses scaled by a random strength per sequence, from 0.3× to 3× | The same as flipflop | Cells respond to relative change rather than absolute amount. Can the circuit ignore the dose? |
 | **background** | Flip-flop pulses on top of a slowly wandering background level | The same as flipflop | Cells adapt to steady backgrounds yet still react to sharp signals. Can the circuit tell a pulse from a drifting baseline? |
 | **commit** | A drug arriving as brief strong spikes or longer, weaker exposures | Off until the accumulated exposure crosses a threshold, then on for good | Cells commit to dividing, differentiating or dying only after sustained signals, and never go back. Brief spikes alone must not trigger it |
+| **resistance** | A drug arriving in episodes of varying strength and length | On while the cell responds to the drug; off once sustained exposure has made it drug-tolerant, until a long enough drug holiday (25 steps) resensitizes it | Reversible drug tolerance, as in drug-tolerant persister cells. The circuit must remember both that it became tolerant and how long the drug has been gone |
 | **antagonist** | An agonist and a competing antagonist, both drifting slowly | On while the receptor is more than half occupied by the agonist | Classic receptor pharmacology. It needs no memory, so it shows where even the contraction arm is competitive |
 
 ## The membrane
@@ -192,6 +193,24 @@ answer together. *New example* draws another.
   each. A good model switches on near each mark, and its switch point shifts right as more antagonist competes.
 - *commit*: a map of drug exposures by strength and duration, showing where the model commits against where the
   cell should. Filled cells where there is no outline are false commitments; outlines with no fill are missed ones.
+
+**Therapy search** (resistance and commit models) asks the question the whole project points at: once a cell is in
+a state you don't want, what gets it out? It puts the model into its unwanted state (drug-tolerant, or committed) with
+a long strong dose, then tries 90 schedules over 120 steps: five drug doses, including none at all; three lengths of
+time on; three lengths of time off; each with and without an inhibitor partly blocking a quarter of the circuit's units.
+For every schedule it checks whether the model recovers, and runs the true biological rule on the same schedule.
+
+The result says how many schedules work, the one with the least total drug, whether a plain drug holiday is enough,
+whether adding the inhibitor helps or hurts, and where model and biology disagree. Two kinds of disagreement matter:
+a *false cure* is a schedule that rescues the model but not the real rule, a weakness in the model; a *missed cure*
+is one the rule allows but the model cannot find, a state the model has made harder to escape than it should be.
+If the model never reaches the unwanted state in the first place, the search says so and stops.
+
+For commit, the true rule says commitment is permanent, so any schedule that reverses it is something the model does
+that real commitment would not.
+
+What the search tells you is about the model, not a patient. It becomes a statement about biology only when a result
+holds across arms, seeds, membranes and noise, and is then checked against a real network with the same wiring.
 
 **Export** downloads the model in three forms, each named with the task, arm, seed and run so files never overwrite
 each other:

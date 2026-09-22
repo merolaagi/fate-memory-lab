@@ -119,3 +119,22 @@ def test_report_and_model_api(tmp_path, monkeypatch):
         assert len(sim["output"][0]) == 200
         ex = client.get(f"/api/runs/{rid}/model/export", params={"task": "commit", "kind": "torch"})
         assert "fate-cell-model-commit" in ex.headers["content-disposition"]
+
+
+def test_resistance_rule_and_therapy():
+    import numpy as np
+
+    from app.engine import resistance_truth
+    from app.model import therapy
+
+    x = np.zeros((80, 1, 1))
+    x[:20, 0, 0] = 1.0
+    x[30:34, 0, 0] = 0.8
+    x[70:74, 0, 0] = 0.8
+    y = resistance_truth(x)
+    assert y[1, 0, 0] == 1.0
+    assert y[32, 0, 0] == -1.0
+    assert y[72, 0, 0] == 1.0
+    r = run_job("resistance", "coop", tiny())
+    th = therapy(r["model"], "resistance")
+    assert th["n"] == 90 and len(th["rows"]) == 90 and len(th["by_inhibitor"]) == 2

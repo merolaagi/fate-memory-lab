@@ -32,6 +32,8 @@ Membrane (input stage, identical for every arm):
 Drug tasks:
   commit      a drug arrives as brief spikes or sustained exposures; once its leaky accumulated exposure
               crosses a threshold the cell commits and the output switches on for good
+  resistance  a drug makes the cell respond, but sustained exposure switches it into a drug-tolerant state that
+              ignores the drug; a long enough drug holiday resensitizes it (reversible drug tolerance)
   antagonist  an agonist and a competing antagonist wander slowly; the output is on while the receptor
               is more than half occupied, A / (A + K (1 + B / Kb)) > 0.5 with K = 0.5, Kb = 1
 
@@ -51,6 +53,7 @@ TASKS = {
     "background": {"nin": 3, "nout": 3},
     "commit": {"nin": 1, "nout": 1},
     "antagonist": {"nin": 2, "nout": 1},
+    "resistance": {"nin": 1, "nout": 1},
 }
 MEMBRANES = ["direct", "transporter", "gated"]
 DT = 0.5
@@ -197,6 +200,36 @@ def uptake_curve(P):
             "vmax": onp.round(vmax, 3).tolist(), "km": onp.round(km, 3).tolist()}
 
 
+TOL_ON, TOL_DECAY, HOLIDAY = 5.0, 0.9, 25
+
+
+def commit_truth(x):
+    T, B = x.shape[0], x.shape[1]
+    y = -onp.ones((T, B, 1))
+    acc = onp.zeros(B)
+    done = onp.zeros(B, dtype=bool)
+    for t in range(T):
+        acc = 0.85 * acc + x[t, :, 0]
+        done |= acc > 3.2
+        y[t, done, 0] = 1.0
+    return y
+
+
+def resistance_truth(x, tolerant0=None):
+    T, B = x.shape[0], x.shape[1]
+    y = -onp.ones((T, B, 1))
+    exposure = onp.zeros(B)
+    tolerant = onp.zeros(B, dtype=bool) if tolerant0 is None else tolerant0.copy()
+    free = onp.zeros(B)
+    for t in range(T):
+        d = x[t, :, 0]
+        exposure = TOL_DECAY * exposure + d
+        free = onp.where(d < 0.05, free + 1, 0)
+        tolerant = (tolerant | (exposure > TOL_ON)) & (free < HOLIDAY)
+        y[t, (d > 0.3) & ~tolerant, 0] = 1.0
+    return y
+
+
 def make_batch(task, B, T, p, seed):
     r = onp.random.default_rng(seed)
     nin = TASKS[task]["nin"]
@@ -215,14 +248,16 @@ def make_batch(task, B, T, p, seed):
                     t += dur + 1
                 else:
                     t += 1
-        y = -onp.ones((T, B, 1))
-        acc = onp.zeros(B)
-        done = onp.zeros(B, dtype=bool)
-        for t in range(T):
-            acc = 0.85 * acc + x[t, :, 0]
-            done |= acc > 3.2
-            y[t, done, 0] = 1.0
-        return x, y
+        return x, commit_truth(x)
+    if task == "resistance":
+        x = onp.zeros((T, B, 1))
+        for b in range(B):
+            t = int(r.integers(0, 10))
+            while t < T:
+                dur = int(r.integers(3, 31))
+                x[t:t + dur, b, 0] = r.uniform(0.3, 1.2)
+                t += dur + int(r.integers(2, 41))
+        return x, resistance_truth(x)
     if task == "antagonist":
         lv = r.uniform(0, 2, (B, 2))
         x = onp.zeros((T, B, 2))

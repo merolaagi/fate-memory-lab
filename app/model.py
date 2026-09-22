@@ -3,7 +3,7 @@ import json
 
 import numpy as np
 
-from .engine import TASKS, make_batch
+from .engine import TASKS, commit_truth, make_batch, resistance_truth
 
 TASK_IO = {
     "flipflop": (["channel 1", "channel 2", "channel 3"], ["memory 1", "memory 2", "memory 3"]),
@@ -13,6 +13,7 @@ TASK_IO = {
     "background": (["channel 1", "channel 2", "channel 3"], ["memory 1", "memory 2", "memory 3"]),
     "commit": (["drug concentration"], ["committed"]),
     "antagonist": (["agonist", "antagonist"], ["receptor active"]),
+    "resistance": (["drug"], ["responding to drug"]),
 }
 ARM_RULE = {
     "coop": "sign-consistent: W = S ⊙ softplus(V), S_ij = s_i s_j, no negative cycles",
@@ -44,7 +45,7 @@ class CellModel:
             intake = intake * self._sig(h @ self.G.T + self.g0)
         return intake @ self.U.T + self.b
 
-    def run(self, u, h0=None):
+    def run(self, u, h0=None, block=None):
         u = np.asarray(u, dtype=float)
         if u.ndim == 2:
             u = u[:, None, :]
@@ -52,10 +53,105 @@ class CellModel:
         outs, states = [], []
         for t in range(u.shape[0]):
             for _ in range(self.K):
-                h = h + self.dt * (-h + self._sig(h @ self.W.T + self.drive(u[t], h)))
+                act = self._sig(h @ self.W.T + self.drive(u[t], h))
+                if block is not None:
+                    act = act * block
+                h = h + self.dt * (-h + act)
             outs.append(h @ self.R.T + self.c)
             states.append(h.copy())
         return np.stack(outs), np.stack(states)
+
+
+THERAPY = {
+    "resistance": {
+        "bad": "drug-tolerant", "good": "drug-sensitive again",
+        "induce": (1.0, 40),
+        "goal": "After the schedule, a test dose of the drug makes the cell respond again.",
+    },
+    "commit": {
+        "bad": "committed", "good": "uncommitted",
+        "induce": (1.0, 16),
+        "goal": "After the schedule, the cell is no longer committed. The true rule says commitment is permanent, so any success here is something the model does that real commitment would not.",
+    },
+}
+AMPS = [0.0, 0.3, 0.6, 1.0, 1.5]
+ONS = [2, 5, 10]
+OFFS = [5, 15, 30]
+INHIB = [0.0, 0.25]
+HORIZON = 120
+PROBE = 6
+
+
+def _schedule(a, on, off):
+    x = np.zeros(HORIZON)
+    if a == 0:
+        return x
+    t = 0
+    while t < HORIZON:
+        x[t:t + on] = a
+        t += on + off
+    return x
+
+
+def therapy(spec, task):
+    if task not in THERAPY:
+        return None
+    info = THERAPY[task]
+    m = CellModel(spec)
+    n = m.W.shape[0]
+    amp, dur = info["induce"]
+    induce = np.zeros((dur + 5, 1, 1))
+    induce[:dur, 0, 0] = amp
+    out_i, st_i = m.run(induce)
+    h_bad = st_i[-1]
+    if task == "resistance":
+        test = np.full((PROBE, 1, 1), 0.8)
+        out_t, _ = m.run(test, h0=h_bad)
+        induced = bool(out_t[-4:, 0, 0].mean() < 0)
+        truth_induced = resistance_truth(np.concatenate([induce, test]))[-1, 0, 0] < 0
+    else:
+        induced = bool(out_i[-1, 0, 0] > 0)
+        truth_induced = bool(commit_truth(induce)[-1, 0, 0] > 0)
+    combos = [(a, on, off, inh) for inh in INHIB for a in AMPS for on in ONS for off in OFFS]
+    X = np.stack([_schedule(a, on, off) for a, on, off, _ in combos], axis=1)[:, :, None]
+    order = np.random.default_rng(5).permutation(n)
+    blocks = np.ones((len(combos), n))
+    for i, (_, _, _, inh) in enumerate(combos):
+        if inh > 0:
+            blocks[i, order[: max(1, int(round(inh * n)))]] = 0.3
+    h0 = np.repeat(h_bad, len(combos), axis=0)
+    _, st_s = m.run(X, h0=h0, block=blocks)
+    h_end = st_s[-1]
+    if task == "resistance":
+        test = np.full((PROBE, len(combos), 1), 0.8)
+        out_p, _ = m.run(test, h0=h_end)
+        model_ok = out_p[-4:, :, 0].mean(axis=0) > 0
+        full = np.concatenate([np.repeat(induce, len(combos), axis=1), X, test], axis=0)
+        truth_ok = resistance_truth(full)[-1, :, 0] > 0
+    else:
+        rest = np.zeros((10, len(combos), 1))
+        out_p, _ = m.run(rest, h0=h_end)
+        model_ok = out_p[-1, :, 0] < 0
+        truth_ok = np.zeros(len(combos), dtype=bool)
+    dose = X[:, :, 0].sum(axis=0)
+    rows = []
+    for i, (a, on, off, inh) in enumerate(combos):
+        rows.append({"amp": a, "on": on, "off": off, "inhibitor": inh, "dose": round(float(dose[i]), 2),
+                     "model": bool(model_ok[i]), "truth": bool(truth_ok[i])})
+    ok = [r for r in rows if r["model"]]
+    best = min(ok, key=lambda r: (r["dose"], r["inhibitor"])) if ok else None
+    holiday = [r for r in rows if r["amp"] == 0 and r["inhibitor"] == 0][0]
+    agree = float(np.mean(model_ok == truth_ok))
+    inh_only = [r for r in rows if r["amp"] == 0 and r["inhibitor"] > 0][0]
+    by_inh = [sum(1 for r in rows if r["model"] and r["inhibitor"] == inh) for inh in INHIB]
+    false_cures = sum(1 for r in rows if r["model"] and not r["truth"])
+    missed = sum(1 for r in rows if r["truth"] and not r["model"])
+    return {"by_inhibitor": by_inh, "false_cures": false_cures, "missed": missed,
+            "task": task, "bad": info["bad"], "good": info["good"], "goal": info["goal"], "induced": induced,
+            "truth_induced": bool(truth_induced), "rows": rows, "n_success": len(ok), "n": len(rows),
+            "best": best, "holiday_works": holiday["model"], "holiday_truth": holiday["truth"],
+            "inhibitor_alone_works": inh_only["model"], "agreement": agree, "horizon": HORIZON,
+            "amps": AMPS, "ons": ONS, "offs": OFFS, "inhibitors": INHIB}
 
 
 def simulate(spec, task, T=200, seed=0, p=0.05):

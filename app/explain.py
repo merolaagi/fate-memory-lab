@@ -2,7 +2,7 @@
 import statistics as st
 
 LABEL = {"coop": "sign-consistent", "broken": "one-cycle-flipped", "contract": "contraction", "free": "unconstrained"}
-NEEDS_MEMORY = {"flipflop", "xor", "parity", "dose", "background", "commit"}
+NEEDS_MEMORY = {"flipflop", "xor", "parity", "dose", "background", "commit", "resistance"}
 BIO = {
     "flipflop": "holding three independent on/off states, like a cell keeping several genes locked on or off",
     "xor": "combining two stored states, like a cell whose response depends on two remembered signals together",
@@ -10,6 +10,7 @@ BIO = {
     "dose": "remembering which signal came last regardless of how strong it was, as cells respond to relative change",
     "background": "telling sharp signals apart from a slowly drifting baseline, as adapting cells do",
     "commit": "committing irreversibly after sustained drug exposure while ignoring brief spikes, like a cell deciding to divide or die",
+    "resistance": "becoming drug-tolerant after sustained exposure and regaining sensitivity after a long enough drug holiday, the reversible tolerance seen in drug-tolerant persister cells",
     "antagonist": "reading receptor occupancy when an agonist and a competing antagonist are both present",
 }
 STRESS = {"drift": "weight drift", "noise": "expression noise", "division": "cell division", "inhibitor": "the inhibitor drug"}
@@ -136,6 +137,8 @@ def explain(run):
             km = up["km"]
             lines.append(f"Its transporters half-saturate at concentrations around {_m(km):.2f}; well above that, intake levels off, so the model cannot tell very high doses apart.")
         out["tasks"].append({"task": task, "best_arm": best["arm"], "lines": lines})
+    if "resistance" in cfg["tasks"] or "commit" in cfg["tasks"]:
+        out["next"].append("Build the resistance or commit model and run its therapy search: it puts the model into the unwanted state and tests 90 drug schedules for a way back out.")
     if not out["next"]:
         out["next"].append("Build the model for the best arm below, check its probe chart against the true biology, then export it.")
     return out

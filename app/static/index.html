@@ -186,6 +186,7 @@ const TASK_INFO={
   parity:"One channel of identical pulses. The output flips on every pulse, which asks an order-preserving circuit to move the same input in opposite directions.",
   dose:"Flip-flop where every sequence's pulses are scaled by a random dose, from a third as strong to three times as strong. Cells respond to relative change, not absolute amount; this asks whether the circuit can too.",
   commit:"A drug arrives either as brief strong spikes or as longer, weaker exposures. Once the cell's accumulated exposure crosses a threshold it commits, the way a cell commits to dividing or dying, and the output must switch on and stay on for good. Brief spikes alone should never trigger it.",
+  resistance:"A drug makes the cell respond, but sustained exposure switches it into a drug-tolerant state that ignores the drug. A long enough drug holiday, 25 steps without drug, makes it sensitive again. This is the reversible tolerance of drug-tolerant persister cells.",
   antagonist:"Two drugs compete for one receptor: an agonist that activates it and an antagonist that blocks it, both drifting slowly. The output is on while the receptor is more than half occupied by the agonist. No memory needed, so even the contraction arm can do well here.",
   background:"Flip-flop on top of a slowly wandering background level on every channel. Cells adapt to a steady background and still react to sharp signals; this tests whether the circuit can."
 };
@@ -373,6 +374,8 @@ async function buildModel(rid,box,arm,rep){
     <h3 class="sub">Try it</h3><div class="modelhead"><button class="btn ghost simbtn">New example</button><span class="note simnote"></span></div>
     <figure class="chart simchart"></figure>
     ${m.has_probe?`<h3 class="sub">Probe against the biology</h3><p class="note probenote"></p><figure class="chart probechart"></figure>`:""}
+    ${m.has_therapy?`<h3 class="sub">Therapy search</h3><p class="note">Puts the model into its unwanted state, then tries ${""}90 drug schedules (dose, time on, time off, with and without an inhibitor) over ${""}120 steps and checks which bring it back. The true rule is run on the same schedules for comparison.</p>
+      <button class="btn ghost therbtn">Search schedules</button><div class="therbody"></div>`:""}
     <h3 class="sub">Export</h3><p class="note">Every file name carries the task, arm, seed and run, so downloads never overwrite each other.</p>
     <div class="exports"><a href="/api/runs/${rid}/model/export?${qs}&kind=numpy">Python, NumPy only</a><a href="/api/runs/${rid}/model/export?${qs}&kind=torch">PyTorch module</a><a href="/api/runs/${rid}/model/export?${qs}&kind=json">Layer graph and weights, JSON</a></div>`;
   body.querySelector(".pick").onchange=e=>{const [a,r]=e.target.value.split("|");buildModel(rid,box,a,parseInt(r))};
@@ -380,6 +383,36 @@ async function buildModel(rid,box,arm,rep){
   body.querySelector(".simbtn").onclick=()=>{MODEL[key].seed++;runSim(key,body)};
   runSim(key,body);
   if(m.has_probe) runProbe(key,body);
+  if(m.has_therapy) body.querySelector(".therbtn").onclick=()=>runTherapy(key,body);
+}
+async function runTherapy(key,body){
+  const st=MODEL[key],m=st.info,out=body.querySelector(".therbody");
+  out.innerHTML=`<p class="note">Searching…</p>`;
+  let d;try{d=await api(`/api/runs/${st.rid}/model/therapy?task=${st.task}&arm=${m.arm}&rep=${m.rep}`)}catch(e){out.innerHTML=`<p class="err">${esc(e.message)}</p>`;return}
+  if(!d.induced){out.innerHTML=`<p>The model never reached the ${d.bad} state: a long strong dose did not put it there${d.truth_induced?", although the true rule says it should":""}. There is nothing to reverse, so the search would be meaningless. Train longer or pick a better arm or seed.</p>`;return}
+  let t=`<p>${esc(d.goal)}</p><p>`;
+  t+=d.n_success?`${d.n_success} of ${d.n} schedules brought the model back to ${d.good}. `:`No schedule out of ${d.n} brought the model back to ${d.good}: in this model the ${d.bad} state behaves as a trap. `;
+  if(d.best) t+=d.best.amp===0?`The gentlest that works uses no drug at all${d.best.inhibitor?`, only the inhibitor on ${d.best.inhibitor*100}% of units`:", just a drug holiday"}. `:`The one with the least total drug gives ${d.best.amp} for ${d.best.on} steps, then ${d.best.off} off${d.best.inhibitor?", with the inhibitor":""}, ${d.best.dose} units in all. `;
+  if(d.task==="resistance"){
+    t+=`A plain drug holiday ${d.holiday_works?"works":"does not work"} in the model; in the true rule it ${d.holiday_truth?"works":"does not"}. `;
+    if(d.inhibitor_alone_works&&!d.holiday_works) t+="The inhibitor alone resensitizes the model where a plain holiday does not: a route worth a closer look. ";
+  }
+  const wo=d.by_inhibitor[0], wi=d.by_inhibitor[1];
+  if(wi!==undefined&&wo!==undefined&&wi!==wo) t+=`Adding the inhibitor ${wi>wo?"helps":"hurts"}: ${wi} schedules work with it against ${wo} without. `;
+  t+=`Model and true rule agree on ${pct(d.agreement)} of schedules`+(d.false_cures||d.missed?`, with ${d.false_cures} cure${d.false_cures===1?"":"s"} the biology would not give and ${d.missed} the model misses.`:".")+`</p>`+
+    `<p class="note">The true rule has no inhibitor in it, so it treats the inhibitor panels exactly like the drug-only ones. Differences between the panels come from the model alone.</p>`;
+  const grid=(inh)=>{
+    const cs=26,p=50,cols=d.ons.length*d.offs.length,w=p+cols*cs+10,h=30+d.amps.length*cs+30;
+    let g="";
+    d.amps.forEach((a,i)=>{g+=`<text x="${p-8}" y="${30+i*cs+17}" font-size="10" text-anchor="end" fill="var(--muted)">${a}</text>`;
+      let j=0;for(const on of d.ons)for(const off of d.offs){
+        const r=d.rows.find(x=>x.amp===a&&x.on===on&&x.off===off&&x.inhibitor===inh);
+        g+=`<rect x="${p+j*cs+1}" y="${30+i*cs+1}" width="${cs-2}" height="${cs-2}" rx="3" fill="${r.model?armColor(m.arm):"var(--well)"}"${r.truth?` stroke="var(--ink)" stroke-width="2"`:""}><title>dose ${a}, ${on} on, ${off} off${inh?", inhibitor":""}: model ${r.model?"recovers":"stays "+d.bad}; true rule ${r.truth?"recovers":"stays "+d.bad}; total drug ${r.dose}</title></rect>`;j++}});
+    let j=0;for(const on of d.ons)for(const off of d.offs){g+=`<text x="${p+j*cs+cs/2}" y="${h-12}" font-size="9" text-anchor="middle" fill="var(--muted)">${on}/${off}</text>`;j++}
+    g+=`<text x="${p}" y="18" font-size="11" fill="var(--muted)">${inh?"With inhibitor on "+inh*100+"% of units":"Drug only"}</text>`;
+    return `<svg viewBox="0 0 ${w} ${h}" style="max-width:${w*1.25}px" role="img" aria-label="Therapy schedule results${inh?" with inhibitor":""}">${g}</svg>`;
+  };
+  out.innerHTML=t+`<div class="charts">${d.inhibitors.map(grid).join("")}</div><p class="note">Rows: drug dose. Columns: steps on / steps off. Filled cells are schedules that restore the model; outlined cells are schedules that restore the true rule. Filled without an outline is a cure the biology would not give; outlined without a fill is one the model misses.</p>`;
 }
 function drawCanvas(key,body){
   const st=MODEL[key], g=st.info.graph, svg=body.querySelector(".canvas");

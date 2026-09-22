@@ -20,7 +20,7 @@ from typing import Literal
 
 from .engine import ARMS, DEFAULTS, MEMBRANES, TASKS, Cancelled, run_job
 from .explain import LABEL, explain
-from .model import code_numpy, code_torch, graph, probe, simulate
+from .model import THERAPY, code_numpy, code_torch, graph, probe, simulate, therapy
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = Path(os.environ.get("FML_DATA", ROOT / "data" / "runs"))
@@ -337,7 +337,18 @@ def model_info(rid: str, task: str, arm: str | None = None, rep: int | None = No
             "acc_test_len": r["acc_test_len"], "title": _title(run, r),
             "candidates": sorted([{"arm": x["arm"], "rep": x.get("rep", 0), "acc": x["acc_test_len"]} for x in rs],
                                  key=lambda x: (-x["acc"])),
-            "graph": graph(r["model"], task, r), "has_probe": task in ("antagonist", "commit")}
+            "graph": graph(r["model"], task, r), "has_probe": task in ("antagonist", "commit"),
+            "has_therapy": task in THERAPY}
+
+
+@app.get("/api/runs/{rid}/model/therapy")
+def model_therapy(rid: str, task: str, arm: str | None = None, rep: int | None = None):
+    run = load(rid)
+    r, _ = _pick(run, task, arm, rep)
+    out = therapy(r["model"], task)
+    if out is None:
+        raise HTTPException(404, "No therapy search for this task.")
+    return out
 
 
 @app.get("/api/runs/{rid}/model/simulate")

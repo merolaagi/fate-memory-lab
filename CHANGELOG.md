@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0
+- New task: resistance. Sustained drug exposure makes the cell tolerant; a 25-step drug holiday resensitizes it (reversible drug tolerance)
+- Therapy search for resistance and commit models: induces the unwanted state, tries 90 schedules of dose, time on, time off and an inhibitor, and compares every result with the true rule
+- Reports the gentlest working schedule, whether a drug holiday suffices, whether the inhibitor helps or hurts, and counts false and missed cures
+- The run explanation covers resistance and points to the therapy search
+
 ## 0.5.0
 - What this run shows: a plain-language explanation of every finished run, generated locally by fixed rules, with suggested next steps
 - Build model: turns any trained arm and seed into a standalone cell model
