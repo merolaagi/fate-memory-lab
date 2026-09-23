@@ -878,7 +878,21 @@ async function whatIf(node){
     (c.pathways&&Object.keys(c.pathways).length?`<p><b>Pathways affected:</b> ${Object.entries(c.pathways).map(([k,v])=>`${esc(k)} (${v.map(esc).join(", ")})`).join("; ")}.</p>`:"")+
     (c.fluxes.length?`<p class="note">Fluxes that shifted: ${c.fluxes.map(f=>`${esc(f.reaction)} ${f.before} → ${f.after}`).join(", ")}.</p>`:"")+
     (c.settled?"":`<p class="note">This case had not settled by the end of the run: something is still building up.</p>`)).join("");
+  if(d.kind==="r") h+=`<div class="modelhead" style="margin-top:12px"><button class="btn ghost" id="stratbtn">What would help?</button><span class="note">Tries the standard treatment moves in the model and ranks them.</span></div><div id="stratbody"></div>`;
   box.innerHTML=h;
+  const sb=$("#stratbtn"); if(sb) sb.onclick=()=>runStrategies(node);
+}
+async function runStrategies(node){
+  const out=$("#stratbody"); out.innerHTML=`<p class="note">Trying each move and re-running the pathway, a few seconds…</p>`;
+  let d;try{d=await api(`/api/pathways/${NET.pid}/strategies?node=${encodeURIComponent(node)}`)}catch(e){out.innerHTML=`<p class="err">${esc(e.message)}</p>`;return}
+  let h=`<p>With ${esc(d.enzyme)} at ${Math.round(d.residual*100)}% activity, `;
+  h+=d.toxin?`${esc(d.toxin)} rises from ${d.toxin_healthy} to ${d.toxin_disease}`:"no single metabolite stands out as accumulating";
+  h+=`, and the pathway's output flux falls from ${d.output_healthy} to ${d.output_disease}. ${d.tried} moves were tried; the best are below. A score of 1 means the pathway is back to healthy on both counts.</p>`;
+  h+=`<div class="tablewrap"><table><thead><tr><th>Move</th><th>Score</th><th>${esc(d.toxin||"toxin")} after</th><th>Output after</th><th>Matches a real drug</th></tr></thead><tbody>`+
+    d.strategies.map(s=>`<tr><td style="text-align:left;white-space:normal"><b>${esc(s.move)}</b><br><span class="note">${esc(s.mechanism)}</span></td>
+      <td>${s.score}</td><td>${s.toxin_after}</td><td>${s.flux_after}</td><td style="text-align:left;white-space:normal">${s.known_drugs.length?esc([...new Set(s.known_drugs)].join(", ")):"—"}</td></tr>`).join("")+
+    `</tbody></table></div><p class="note">These are moves inside a model with illustrative rate constants, not treatment advice. Their value is in showing which kind of approach the network structure favours, and where the model agrees with treatments that already exist.</p>`;
+  out.innerHTML=h;
 }
 async function runDeeper(pid){
   const box=$("#pwdeepbody"); box.innerHTML=`<p class="note">Measuring: this runs the pathway many times and takes a few seconds…</p>`;

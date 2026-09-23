@@ -99,10 +99,15 @@ you run it.
 
 ## Pathways
 
-Eight pathways ship with the app: glycolysis, lactate fermentation, the oxidative pentose phosphate pathway, the
-citric acid cycle, the urea cycle, phenylalanine and tyrosine catabolism, galactose metabolism (Leloir), and purine
-salvage and degradation. The last four carry clinical annotations: the inherited deficiency of each enzyme and the
-drugs that act on it. Stoichiometry follows standard textbook reactions, including the classic allosteric controls such
+Twenty-six pathways ship with the app, covering carbohydrate, fat, amino acid, nucleotide, haem, lipid and drug
+metabolism: glycolysis, fermentation, the pentose phosphate pathway, the citric acid cycle, gluconeogenesis, glycogen,
+fructose, galactose, the polyol pathway, pyruvate, beta-oxidation, ketone bodies, propionate, branched-chain amino
+acids, the urea cycle, phenylalanine and tyrosine, catecholamines, methionine and homocysteine, folate, purines,
+pyrimidines, haem, bilirubin, glutathione, sphingolipids, cholesterol and alcohol.
+
+Almost every enzyme step carries its **inherited deficiency** and the **drugs that act on it**, so the model links a
+molecular block to a named condition and to the treatments that already exist. Rate constants are balanced
+automatically (`tools/balance.py`) so each pathway reaches a steady state; they are illustrative, not measured. Stoichiometry follows standard textbook reactions, including the classic allosteric controls such
 as ATP inhibiting phosphofructokinase. **Rate constants are illustrative, not fitted to measurements.** Structural
 results are therefore exact and transferable; specific concentrations and timings are not.
 
@@ -140,6 +145,16 @@ For each pathway the app reports:
 - **Graph database export**: every pathway converts to Cypher that builds it in Neo4j as Pathway, Metabolite,
   Reaction, Enzyme, Drug and Condition nodes, with SUBSTRATE_OF, PRODUCES, REGULATES, CATALYSES, ACTS_ON and
   CAUSED_BY_LOSS_OF relationships. Download the file, or push straight into a running database.
+- **What would help**, on any enzyme step: with that enzyme at 5% activity, the model tries the standard
+  therapeutic moves and ranks them by how far each restores the pathway. The moves mirror real practice: restore the
+  enzyme (replacement, gene therapy, chaperone or vitamin), block a step upstream or downstream (substrate reduction,
+  as nitisinone does), push an alternative route, drain the toxic metabolite with a scavenger, supply the missing
+  product, or restrict the dietary input. Each result shows the toxin level and output flux afterwards, and flags
+  where the move matches a drug that is actually used.
+
+  This is where the model earns its keep. For Gaucher disease it ranks blocking glucosylceramide synthase among the
+  best moves after replacing the enzyme, which is exactly what miglustat and eliglustat do; the model was never told
+  those drugs exist for that purpose.
 - **Time courses**, with a one-click **knockdown** of any enzyme to 20% of its activity, the in-model equivalent of an
   inhibitor drug.
 

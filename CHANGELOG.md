@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0
+- Eighteen more pathways, 26 in total: gluconeogenesis, glycogen, fructose, the polyol pathway, pyruvate, beta-oxidation, ketone bodies, propionate, branched-chain amino acids, catecholamines, methionine and homocysteine, folate, pyrimidines, haem, bilirubin, glutathione, sphingolipids, cholesterol and alcohol
+- Almost every enzyme step now carries its inherited deficiency and the drugs acting on it
+- What would help: a therapy search that drops an enzyme to 5% activity, tries the standard treatment moves (enzyme restoration, substrate reduction, upstream or downstream block, scavenger, product supplementation, dietary restriction, alternative route) and ranks them, flagging matches with real drugs
+- tools/balance.py automatically balances rate constants so every pathway and the joined network reach a steady state; results are stored in app/rate_tuning.json
+
 ## 1.1.0
 - Whole metabolism: all eight pathways joined into one network through shared metabolites, with structure, simulation, network view and what-if all working on the joined system
 - A what-if on the joined network reports which source pathways the change reaches

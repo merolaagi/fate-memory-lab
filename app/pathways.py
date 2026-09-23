@@ -180,6 +180,372 @@ _p("purine", "Purine salvage and degradation",
    "Purine salvage and degradation; diseases and drugs as in clinical pharmacology texts")
 
 
+_p("glycogen", "Glycogen storage and breakdown",
+   "Storing glucose as glycogen and releasing it between meals. Glycogen itself is a store, so its level drifts up "
+   "or down rather than settling; everything else in the pathway settles. Blocks here are the glycogen storage diseases, and "
+   "they split neatly into liver forms that cause low blood sugar and muscle forms that cause exercise intolerance.",
+   ["G6P", "G1P", "UDPGlc", "Glycogen", "Glc", "UTP", "UDP", "Pi"], ["UTP", "Pi", "G6P"],
+   [R("pgm", "Phosphoglucomutase", "PGM", {"G6P": 1}, {"G1P": 1}, kcat=1.5, km=0.4, reversible=True),
+    R("ugp", "UDP-glucose pyrophosphorylase", "UGP", {"G1P": 1, "UTP": 1}, {"UDPGlc": 1}, kcat=1.4, km=0.3),
+    R("gys", "Glycogen synthase", "GYS", {"UDPGlc": 1}, {"Glycogen": 1, "UDP": 1}, kcat=0.4, km=0.3,
+      deficiency="Glycogen storage disease 0: too little glycogen, so fasting hypoglycaemia without hepatomegaly"),
+    R("pyg", "Glycogen phosphorylase", "PYG", {"Glycogen": 1, "Pi": 1}, {"G1P": 1}, kcat=1.2, km=0.3,
+      deficiency="McArdle disease in muscle (PYGM) or Hers disease in liver (PYGL): glycogen cannot be released"),
+    R("g6pase", "Glucose-6-phosphatase", "G6Pase", {"G6P": 1}, {"Glc": 1, "Pi": 1}, kcat=2.0, km=0.4,
+      deficiency="Von Gierke disease (GSD I): glucose-6-phosphate cannot leave as glucose, causing severe fasting hypoglycaemia, lactic acidosis and hepatomegaly"),
+    R("glc_out", "Glucose to the blood", "Export", {"Glc": 1}, {}, kcat=1.5, km=0.4),
+    R("udp_recycle", "UDP back to UTP", "NDPK", {"UDP": 1}, {"UTP": 1}, kcat=2.0, km=0.4)],
+   "Glycogen metabolism; storage diseases as in clinical genetics texts")
+
+_p("gluconeogenesis", "Gluconeogenesis",
+   "Making glucose from pyruvate when the diet does not supply it. Its enzymes are the ones that fail in fasting "
+   "hypoglycaemia, and one of them is the site where metformin acts indirectly.",
+   ["Pyr", "OAA", "PEP", "F16BP", "F6P", "G6P", "Glc", "CO2", "ATP", "ADP", "Pi"], ["Pyr", "CO2", "ATP", "ADP", "Pi"],
+   [R("pc", "Pyruvate carboxylase", "PC", {"Pyr": 1, "CO2": 1, "ATP": 1}, {"OAA": 1, "ADP": 1, "Pi": 1}, kcat=0.8, km=0.3,
+      deficiency="Pyruvate carboxylase deficiency: lactic acidosis and failure to make glucose; biotin is its cofactor"),
+    R("pepck", "PEP carboxykinase", "PEPCK", {"OAA": 1}, {"PEP": 1, "CO2": 1}, kcat=1.2, km=0.3,
+      deficiency="PEPCK deficiency: severe fasting hypoglycaemia"),
+    R("enol_rev", "Reverse glycolysis to fructose-1,6-bisphosphate", "Enolase-Aldolase", {"PEP": 1}, {"F16BP": 1},
+      kcat=1.2, km=0.4),
+    R("fbpase", "Fructose-1,6-bisphosphatase", "FBPase", {"F16BP": 1}, {"F6P": 1, "Pi": 1}, kcat=1.2, km=0.3,
+      deficiency="FBPase deficiency: hypoglycaemia and lactic acidosis after fasting or illness"),
+    R("pgi", "Phosphoglucose isomerase", "PGI", {"F6P": 1}, {"G6P": 1}, kcat=2.0, km=0.4, reversible=True),
+    R("g6pase", "Glucose-6-phosphatase", "G6Pase", {"G6P": 1}, {"Glc": 1, "Pi": 1}, kcat=1.2, km=0.4,
+      deficiency="Von Gierke disease (GSD I), the same enzyme that ends glycogen breakdown"),
+    R("glc_out", "Glucose to the blood", "Export", {"Glc": 1}, {}, kcat=1.5, km=0.4)],
+   "Gluconeogenesis; deficiencies as in clinical genetics texts")
+
+_p("fructose", "Fructose metabolism",
+   "How dietary fructose enters glycolysis. A block at the second step traps phosphate inside the liver cell and "
+   "causes hereditary fructose intolerance, treated entirely by removing fructose from the diet.",
+   ["Fru", "F1P", "DHAP", "Glyceraldehyde", "GAP", "ATP", "ADP"], ["ATP", "ADP"],
+   [R("fru_in", "Dietary fructose", "Diet", {}, {"Fru": 1}, kcat=0.35),
+    R("khk", "Fructokinase", "KHK", {"Fru": 1, "ATP": 1}, {"F1P": 1, "ADP": 1}, kcat=1.2, km=0.3,
+      deficiency="Essential fructosuria: harmless, fructose simply appears in the urine"),
+    R("aldob", "Aldolase B", "ALDOB", {"F1P": 1}, {"DHAP": 1, "Glyceraldehyde": 1}, kcat=1.2, km=0.3,
+      deficiency="Hereditary fructose intolerance: fructose-1-phosphate accumulates, traps phosphate and blocks glucose production, causing hypoglycaemia and liver damage after fructose"),
+    R("tk", "Triose kinase", "TK", {"Glyceraldehyde": 1, "ATP": 1}, {"GAP": 1, "ADP": 1}, kcat=1.5, km=0.3),
+    R("dhap_out", "DHAP into glycolysis", "Transfer", {"DHAP": 1}, {}, kcat=1.5, km=0.4),
+    R("gap_out", "GAP into glycolysis", "Transfer", {"GAP": 1}, {}, kcat=1.5, km=0.4)],
+   "Fructose metabolism; hereditary fructose intolerance as in clinical genetics texts")
+
+_p("betaox", "Fatty acid beta-oxidation",
+   "Burning fat for energy, including the carnitine shuttle that carries fatty acids into mitochondria. Blocks here "
+   "cause hypoglycaemia during fasting or illness, because the body cannot switch from sugar to fat.",
+   ["FA", "AcylCoA", "AcylCarn", "AcylCoA_m", "EnoylCoA", "AcCoA", "NAD", "NADH", "CoA", "Carn", "FAD", "FADH2"],
+   ["FA", "Carn"],
+   [R("acs", "Acyl-CoA synthetase", "ACS", {"FA": 1, "CoA": 1}, {"AcylCoA": 1}, kcat=1.0, km=0.3),
+    R("cpt1", "Carnitine palmitoyltransferase I", "CPT1", {"AcylCoA": 1, "Carn": 1}, {"AcylCarn": 1, "CoA": 1},
+      kcat=1.2, km=0.3,
+      deficiency="CPT1 deficiency: fat cannot enter mitochondria, causing hypoketotic hypoglycaemia when fasting"),
+    R("cpt2", "Carnitine palmitoyltransferase II", "CPT2", {"AcylCarn": 1, "CoA": 1}, {"AcylCoA_m": 1, "Carn": 1},
+      kcat=1.5, km=0.3,
+      deficiency="CPT2 deficiency: muscle breakdown after exercise or fasting"),
+    R("acad", "Acyl-CoA dehydrogenase", "MCAD", {"AcylCoA_m": 1, "FAD": 1}, {"EnoylCoA": 1, "FADH2": 1}, kcat=1.2, km=0.3,
+      deficiency="MCAD deficiency: the commonest fat oxidation disorder; fasting illness causes hypoketotic hypoglycaemia and can be fatal, but is prevented simply by avoiding long fasts"),
+    R("spiral", "Rest of the beta-oxidation spiral", "HADH-Thiolase", {"EnoylCoA": 1, "NAD": 1, "CoA": 1},
+      {"AcCoA": 1, "NADH": 1}, kcat=1.5, km=0.3),
+    R("accoa_out", "Acetyl-CoA to the TCA cycle or ketones", "Transfer", {"AcCoA": 1}, {"CoA": 1}, kcat=1.5, km=0.4),
+    R("etf", "FADH2 reoxidation", "ETF", {"FADH2": 1}, {"FAD": 1}, kcat=2.0, km=0.3),
+    R("nadh_ox", "NADH reoxidation", "Respiration", {"NADH": 1}, {"NAD": 1}, kcat=2.0, km=0.3)],
+   "Beta-oxidation and the carnitine shuttle; disorders as in clinical genetics texts")
+
+_p("ketone", "Ketone body production and use",
+   "Turning acetyl-CoA into ketone bodies during fasting, and burning them in brain and muscle. This is the backup "
+   "fuel that fails when fat oxidation is blocked.",
+   ["AcCoA", "AcAcCoA", "HMGCoA", "AcAc", "BHB", "CoA", "NAD", "NADH"], [],
+   [R("fat_in", "Acetyl-CoA arriving from fat oxidation", "Beta-oxidation", {"CoA": 1}, {"AcCoA": 1}, kcat=1.6, km=0.3),
+    R("thiolase", "Thiolase", "ACAT1", {"AcCoA": 2}, {"AcAcCoA": 1, "CoA": 1}, kcat=0.8, km=0.3,
+      deficiency="Beta-ketothiolase deficiency: ketoacidotic crises"),
+    R("hmgcs", "HMG-CoA synthase", "HMGCS2", {"AcAcCoA": 1, "AcCoA": 1}, {"HMGCoA": 1, "CoA": 1}, kcat=2.5, km=0.3,
+      deficiency="HMG-CoA synthase deficiency: no ketones when fasting, so hypoketotic hypoglycaemia"),
+    R("hmgcl", "HMG-CoA lyase", "HMGCL", {"HMGCoA": 1}, {"AcAc": 1, "AcCoA": 1}, kcat=1.5, km=0.3,
+      deficiency="HMG-CoA lyase deficiency: no ketones and toxic intermediates accumulate"),
+    R("bdh", "Beta-hydroxybutyrate dehydrogenase", "BDH1", {"AcAc": 1, "NADH": 1}, {"BHB": 1, "NAD": 1},
+      kcat=1.5, km=0.3, reversible=True),
+    R("scot", "Ketone use in tissues", "SCOT", {"AcAc": 1, "CoA": 1}, {"AcAcCoA": 1}, kcat=0.6, km=0.3,
+      deficiency="SCOT deficiency: ketones are made but cannot be used, causing permanent ketosis and crises"),
+    R("acacoa_use", "Acetoacetyl-CoA burned for energy", "Thiolase", {"AcAcCoA": 1, "CoA": 1}, {"AcCoA": 2},
+      kcat=1.2, km=0.3),
+    R("bhb_out", "Beta-hydroxybutyrate to the blood", "Export", {"BHB": 1}, {}, kcat=1.5, km=0.4),
+    R("acac_out", "Acetoacetate to the blood", "Export", {"AcAc": 1}, {}, kcat=1.5, km=0.4),
+    R("nadh_ox", "NADH reoxidation", "Respiration", {"NADH": 1}, {"NAD": 1}, kcat=1.5, km=0.3)],
+   "Ketogenesis and ketolysis; disorders as in clinical genetics texts")
+
+_p("bcaa", "Branched-chain amino acid breakdown",
+   "Breaking down leucine, isoleucine and valine. A block at the second step is maple syrup urine disease, named for "
+   "the smell of the accumulating keto acids.",
+   ["BCAA", "BCKA", "BCAcylCoA", "AcCoA", "NAD", "NADH", "CoA"], ["BCAA"],
+   [R("bcat", "Branched-chain aminotransferase", "BCAT", {"BCAA": 1}, {"BCKA": 1}, kcat=0.72, km=0.3),
+    R("bckdh", "Branched-chain ketoacid dehydrogenase", "BCKDH", {"BCKA": 1, "NAD": 1, "CoA": 1},
+      {"BCAcylCoA": 1, "NADH": 1}, kcat=1.6, km=0.3,
+      deficiency="Maple syrup urine disease: branched-chain keto acids accumulate and are neurotoxic; thiamine helps in some forms",
+      drugs=[{"name": "Thiamine", "effect": "activates", "note": "cofactor; a minority of patients respond to high doses"}]),
+    R("ivd", "Isovaleryl-CoA dehydrogenase and the rest", "IVD", {"BCAcylCoA": 1}, {"AcCoA": 1}, kcat=1.5, km=0.3,
+      deficiency="Isovaleric acidemia: a sweaty-feet odour and metabolic crises"),
+    R("accoa_out", "Acetyl-CoA onward", "Transfer", {"AcCoA": 1}, {"CoA": 1}, kcat=1.5, km=0.4),
+    R("nadh_ox", "NADH reoxidation", "Respiration", {"NADH": 1}, {"NAD": 1}, kcat=2.0, km=0.3)],
+   "Branched-chain amino acid catabolism; MSUD as in clinical genetics texts")
+
+_p("homocysteine", "Methionine and homocysteine",
+   "The cycle that recycles methionine and disposes of homocysteine. Blocks raise homocysteine, which damages blood "
+   "vessels, and the treatments are vitamins plus a bypass.",
+   ["Met", "SAM", "SAH", "Hcy", "Cystathionine", "Cys", "Ser", "MeTHF", "THF", "B12"], ["Met", "Ser", "B12"],
+   [R("mat", "Methionine adenosyltransferase", "MAT", {"Met": 1}, {"SAM": 1}, kcat=1.0, km=0.3),
+    R("methyl", "Methyl transfer reactions", "MTs", {"SAM": 1}, {"SAH": 1}, kcat=1.5, km=0.3),
+    R("sahh", "SAH hydrolase", "AHCY", {"SAH": 1}, {"Hcy": 1}, kcat=1.5, km=0.3, reversible=True),
+    R("ms", "Methionine synthase", "MTR", {"Hcy": 1, "MeTHF": 1, "B12": 1}, {"Met": 1, "THF": 1, "B12": 1},
+      kcat=1.2, km=0.3,
+      deficiency="Methionine synthase deficiency, or functional loss from B12 deficiency: homocysteine rises and methionine falls",
+      drugs=[{"name": "Hydroxocobalamin (B12)", "effect": "activates", "note": "restores the cofactor when the problem is B12 supply"}]),
+    R("cbs", "Cystathionine beta-synthase", "CBS", {"Hcy": 1, "Ser": 1}, {"Cystathionine": 1}, kcat=1.2, km=0.3,
+      deficiency="Classic homocystinuria: homocysteine accumulates, causing lens dislocation, marfanoid build, clots and stroke",
+      drugs=[{"name": "Pyridoxine (B6)", "effect": "activates", "note": "cofactor; about half of patients respond"},
+             {"name": "Betaine", "effect": "activates", "note": "opens a bypass that remethylates homocysteine back to methionine"}]),
+    R("cth", "Cystathionase", "CTH", {"Cystathionine": 1}, {"Cys": 1}, kcat=1.5, km=0.3),
+    R("cys_out", "Cysteine onward", "Transfer", {"Cys": 1}, {}, kcat=1.5, km=0.4),
+    R("mthfr", "MTHFR: folate methyl supply", "MTHFR", {"THF": 1}, {"MeTHF": 1}, kcat=1.5, km=0.3,
+      deficiency="MTHFR deficiency: less methyl folate, so homocysteine rises",
+      drugs=[{"name": "Folate", "effect": "activates", "note": "supports the methyl supply"}])],
+   "Methionine cycle and transsulfuration; homocystinurias as in clinical genetics texts")
+
+_p("folate", "Folate and one-carbon metabolism",
+   "The carrier of one-carbon units for DNA synthesis. It is the target of methotrexate and of trimethoprim in "
+   "bacteria, which makes it a pathway where a deliberate block is the treatment.",
+   ["Folate", "DHF", "THF", "MeTHF", "dUMP", "dTMP", "NADPH", "NADP"], ["Folate", "dUMP", "NADPH", "NADP"],
+   [R("dhfr1", "Dihydrofolate reductase, first pass", "DHFR", {"Folate": 1, "NADPH": 1}, {"DHF": 1, "NADP": 1},
+      kcat=0.3, km=0.3),
+    R("dhfr2", "Dihydrofolate reductase", "DHFR", {"DHF": 1, "NADPH": 1}, {"THF": 1, "NADP": 1}, kcat=4.0, km=0.3,
+      deficiency="DHFR deficiency: megaloblastic anaemia",
+      drugs=[{"name": "Methotrexate", "effect": "inhibits", "note": "blocks this step in cancer, rheumatoid arthritis and psoriasis"},
+             {"name": "Trimethoprim", "effect": "inhibits", "note": "selective for the bacterial enzyme"}]),
+    R("shmt", "Serine hydroxymethyltransferase", "SHMT", {"THF": 1}, {"MeTHF": 1}, kcat=1.5, km=0.3),
+    R("ts", "Thymidylate synthase", "TYMS", {"MeTHF": 1, "dUMP": 1}, {"dTMP": 1, "DHF": 1}, kcat=0.8, km=0.3,
+      drugs=[{"name": "5-fluorouracil", "effect": "inhibits", "note": "the classic chemotherapy block of DNA precursor supply"}]),
+    R("dtmp_out", "dTMP into DNA synthesis", "Transfer", {"dTMP": 1}, {}, kcat=1.5, km=0.4)],
+   "Folate one-carbon metabolism; drug targets as in clinical pharmacology texts")
+
+_p("heme", "Heme synthesis",
+   "Building heme from glycine and succinyl-CoA. Partial blocks cause the porphyrias, where intermediates accumulate, "
+   "and lead poisoning blocks two steps at once.",
+   ["Gly", "SucCoA", "ALA", "PBG", "HMB", "Copro", "Proto", "Heme", "Fe"], ["Gly", "SucCoA", "Fe"],
+   [R("alas", "ALA synthase", "ALAS", {"Gly": 1, "SucCoA": 1}, {"ALA": 1}, kcat=0.6, km=0.3,
+      regulators=[{"species": "Heme", "effect": "inhibit", "k": 0.5}],
+      deficiency="X-linked sideroblastic anaemia when deficient; when other steps are blocked this enzyme is de-repressed and drives the attack",
+      drugs=[{"name": "Haem arginate", "effect": "inhibits", "note": "given in acute porphyria to switch this step off by feedback"},
+             {"name": "Givosiran", "effect": "inhibits", "note": "silences this enzyme's message in acute hepatic porphyria"}]),
+    R("alad", "ALA dehydratase", "ALAD", {"ALA": 2}, {"PBG": 1}, kcat=1.2, km=0.3,
+      deficiency="ALAD porphyria, very rare",
+      drugs=[{"name": "Lead", "effect": "inhibits", "note": "a poison rather than a drug: lead blocks this step and ferrochelatase, so ALA accumulates"}]),
+    R("pbgd", "PBG deaminase", "PBGD", {"PBG": 1}, {"HMB": 1}, kcat=1.2, km=0.3,
+      deficiency="Acute intermittent porphyria: attacks of pain, neuropathy and confusion, triggered by drugs, fasting and hormones"),
+    R("upd", "Uroporphyrinogen steps", "UROD", {"HMB": 1}, {"Copro": 1}, kcat=1.5, km=0.3,
+      deficiency="Porphyria cutanea tarda: blistering photosensitive skin, the commonest porphyria"),
+    R("cpox", "Coproporphyrinogen oxidase", "CPOX", {"Copro": 1}, {"Proto": 1}, kcat=1.5, km=0.3,
+      deficiency="Hereditary coproporphyria"),
+    R("fech", "Ferrochelatase", "FECH", {"Proto": 1, "Fe": 1}, {"Heme": 1}, kcat=1.5, km=0.3,
+      deficiency="Erythropoietic protoporphyria: painful sun sensitivity",
+      drugs=[{"name": "Lead", "effect": "inhibits", "note": "the second step lead blocks"}]),
+    R("heme_use", "Heme into haemoglobin and enzymes", "Transfer", {"Heme": 1}, {}, kcat=1.0, km=0.4)],
+   "Heme biosynthesis; porphyrias as in clinical genetics and toxicology texts")
+
+_p("bilirubin", "Bilirubin handling",
+   "Disposing of the heme left over from old red cells. A partial block is the harmless Gilbert syndrome; a complete "
+   "one is Crigler-Najjar, where bilirubin reaches the brain.",
+   ["Heme", "Biliverdin", "BilirubinU", "BilirubinC", "UDPGA", "CO"], ["Heme", "UDPGA"],
+   [R("ho1", "Heme oxygenase", "HMOX1", {"Heme": 1}, {"Biliverdin": 1, "CO": 1}, kcat=1.2, km=0.3),
+    R("bvr", "Biliverdin reductase", "BLVR", {"Biliverdin": 1}, {"BilirubinU": 1}, kcat=1.5, km=0.3),
+    R("ugt", "UGT1A1 conjugation", "UGT1A1", {"BilirubinU": 1, "UDPGA": 1}, {"BilirubinC": 1}, kcat=1.9, km=0.3,
+      deficiency="Gilbert syndrome when partial (harmless jaundice under stress) and Crigler-Najjar when severe (kernicterus risk)",
+      drugs=[{"name": "Phenobarbital", "effect": "activates", "note": "induces this enzyme, which works in Crigler-Najjar type II"},
+             {"name": "Atazanavir", "effect": "inhibits", "note": "causes benign jaundice by blocking this step"}]),
+    R("excrete", "Conjugated bilirubin into bile", "MRP2", {"BilirubinC": 1}, {}, kcat=1.5, km=0.4,
+      deficiency="Dubin-Johnson syndrome: conjugated bilirubin cannot be exported"),
+    R("co_out", "Carbon monoxide exhaled", "Export", {"CO": 1}, {}, kcat=2.0, km=0.4)],
+   "Bilirubin metabolism; syndromes as in clinical texts")
+
+_p("pyrimidine", "Pyrimidine synthesis",
+   "Building the other half of the DNA alphabet. It shares carbamoyl phosphate with the urea cycle, which is why a "
+   "urea cycle block spills into orotic acid.",
+   ["CP", "CarbAsp", "Orotate", "OMP", "UMP", "Asp", "PRPP"], ["Asp", "PRPP"],
+   [R("cad_cps2", "CPS II", "CAD", {}, {"CP": 1}, kcat=0.5),
+    R("cad_atc", "Aspartate transcarbamoylase", "CAD", {"CP": 1, "Asp": 1}, {"CarbAsp": 1}, kcat=1.2, km=0.3),
+    R("dhodh", "Dihydroorotate dehydrogenase", "DHODH", {"CarbAsp": 1}, {"Orotate": 1}, kcat=1.2, km=0.3,
+      drugs=[{"name": "Leflunomide", "effect": "inhibits", "note": "blocks this step to damp down immune cell proliferation"},
+             {"name": "Teriflunomide", "effect": "inhibits", "note": "the same block, used in multiple sclerosis"}]),
+    R("umps", "UMP synthase", "UMPS", {"Orotate": 1, "PRPP": 1}, {"OMP": 1}, kcat=1.2, km=0.3,
+      deficiency="Hereditary orotic aciduria: orotic acid accumulates and megaloblastic anaemia follows; treated by giving uridine",
+      drugs=[{"name": "Uridine", "effect": "activates", "note": "bypasses the block by supplying the product directly"}]),
+    R("omp_dec", "OMP decarboxylase", "UMPS", {"OMP": 1}, {"UMP": 1}, kcat=1.5, km=0.3),
+    R("ump_out", "UMP into nucleic acids", "Transfer", {"UMP": 1}, {}, kcat=1.5, km=0.4)],
+   "De novo pyrimidine synthesis; orotic aciduria and drug targets as in clinical texts")
+
+_p("glutathione", "Glutathione and oxidative defence",
+   "The cell's main antioxidant, and the system that mops up the toxic metabolite of paracetamol. Running it down is "
+   "how paracetamol overdose kills the liver, and refilling it is how the antidote works.",
+   ["Cys", "GSH", "GSSG", "NADPH", "NADP", "ROS", "NAPQI", "Adduct"], ["Cys", "NADPH", "NADP", "ROS", "NAPQI"],
+   [R("gcs", "Glutathione synthesis", "GCLC-GSS", {"Cys": 1}, {"GSH": 1}, kcat=1.0, km=0.3,
+      deficiency="Glutathione synthetase deficiency: haemolysis and acidosis",
+      drugs=[{"name": "N-acetylcysteine", "effect": "activates", "note": "supplies cysteine and is the antidote in paracetamol overdose"}]),
+    R("gpx", "Glutathione peroxidase", "GPX", {"GSH": 2, "ROS": 1}, {"GSSG": 1}, kcat=0.9, km=0.3),
+    R("gr", "Glutathione reductase", "GSR", {"GSSG": 1, "NADPH": 1}, {"GSH": 2, "NADP": 1}, kcat=2.4, km=0.3,
+      deficiency="With G6PD deficiency upstream, NADPH runs short and red cells haemolyse under oxidative stress"),
+    R("napqi", "Paracetamol metabolite detoxified by glutathione", "GST", {"NAPQI": 1, "GSH": 1}, {"Adduct": 1},
+      kcat=1.5, km=0.3),
+    R("adduct_out", "Conjugate excreted", "Export", {"Adduct": 1}, {}, kcat=1.5, km=0.4)],
+   "Glutathione system; paracetamol toxicity as in clinical pharmacology texts")
+
+_p("sphingolipid", "Sphingolipid breakdown (lysosomal)",
+   "Lysosomal disposal of membrane lipids. Each enzyme has a storage disease named after it, and the treatments split "
+   "into replacing the enzyme and reducing how much substrate is made.",
+   ["GM2", "GM3", "Ceramide", "GlcCer", "Sphingosine", "SO4"], ["SO4"],
+   [R("supply", "Membrane turnover supplying GM2", "Turnover", {}, {"GM2": 1}, kcat=0.3),
+    R("hexa", "Beta-hexosaminidase A", "HEXA", {"GM2": 1}, {"GM3": 1}, kcat=1.2, km=0.3,
+      deficiency="Tay-Sachs disease: GM2 ganglioside accumulates in neurons, with a cherry-red macula and regression"),
+    R("neu", "Neuraminidase and galactosidase steps", "NEU-GLB1", {"GM3": 1}, {"Ceramide": 1}, kcat=1.5, km=0.3,
+      deficiency="GM1 gangliosidosis when the galactosidase step fails"),
+    R("gba", "Glucocerebrosidase", "GBA", {"GlcCer": 1}, {"Ceramide": 1}, kcat=1.2, km=0.3,
+      deficiency="Gaucher disease: glucocerebroside accumulates in macrophages, enlarging liver and spleen and thinning bone",
+      drugs=[{"name": "Imiglucerase", "effect": "activates", "note": "enzyme replacement therapy, supplying the missing enzyme"},
+             {"name": "Miglustat", "effect": "inhibits", "note": "substrate reduction: blocks synthesis upstream so less accumulates"},
+             {"name": "Ambroxol", "effect": "activates", "note": "chaperone that helps some mutant enzymes fold"}]),
+    R("gcs", "Glucosylceramide synthesis", "UGCG", {"Ceramide": 1}, {"GlcCer": 1}, kcat=1.0, km=0.3,
+      drugs=[{"name": "Miglustat", "effect": "inhibits", "note": "the step substrate reduction therapy blocks"},
+             {"name": "Eliglustat", "effect": "inhibits", "note": "a more selective version of the same idea"}]),
+    R("cdase", "Ceramidase", "ASAH1", {"Ceramide": 1}, {"Sphingosine": 1}, kcat=1.5, km=0.3,
+      deficiency="Farber disease"),
+    R("sph_out", "Sphingosine recycled", "Transfer", {"Sphingosine": 1}, {}, kcat=1.5, km=0.4)],
+   "Sphingolipid degradation; storage diseases and their therapies as in clinical genetics texts")
+
+_p("cholesterol", "Cholesterol synthesis",
+   "Building cholesterol from acetyl-CoA. Its rate-limiting step is the target of statins, the most prescribed drugs "
+   "in the world, and a block at the last step causes a malformation syndrome.",
+   ["AcCoA", "HMGCoA", "Mevalonate", "IPP", "Squalene", "Lathosterol", "Desmosterol", "Cholesterol", "NADPH", "NADP"],
+   ["AcCoA", "NADPH", "NADP"],
+   [R("hmgcs", "HMG-CoA synthase", "HMGCS1", {"AcCoA": 2}, {"HMGCoA": 1}, kcat=0.36, km=0.3),
+    R("hmgcr", "HMG-CoA reductase", "HMGCR", {"HMGCoA": 1, "NADPH": 1}, {"Mevalonate": 1, "NADP": 1}, kcat=3.0, km=0.3,
+      regulators=[{"species": "Cholesterol", "effect": "inhibit", "k": 0.6}],
+      deficiency="Mevalonate kinase deficiency downstream causes periodic fever syndromes",
+      drugs=[{"name": "Statins", "effect": "inhibits", "note": "the rate-limiting step; blocking it lowers LDL cholesterol"}]),
+    R("mvk", "Mevalonate kinase and decarboxylase", "MVK", {"Mevalonate": 1}, {"IPP": 1}, kcat=1.5, km=0.3,
+      deficiency="Mevalonate kinase deficiency: recurrent fevers, from mild (hyper-IgD syndrome) to severe",
+      drugs=[{"name": "Bisphosphonates", "effect": "inhibits", "note": "block the next step along, which is how they act on bone"}]),
+    R("squal", "Squalene synthesis", "FDFT1", {"IPP": 1}, {"Squalene": 1}, kcat=1.5, km=0.3),
+    R("lano", "Squalene to lathosterol", "SQLE-LSS", {"Squalene": 1}, {"Lathosterol": 1}, kcat=1.5, km=0.3),
+    R("sc5d", "Lathosterol to desmosterol", "SC5D", {"Lathosterol": 1}, {"Desmosterol": 1}, kcat=0.9, km=0.3,
+      deficiency="Lathosterolosis"),
+    R("dhcr7", "7-dehydrocholesterol reductase", "DHCR7", {"Desmosterol": 1, "NADPH": 1}, {"Cholesterol": 1, "NADP": 1},
+      kcat=2.4, km=0.3,
+      deficiency="Smith-Lemli-Opitz syndrome: cholesterol cannot be finished, causing malformations and intellectual disability; treated by feeding cholesterol"),
+    R("chol_use", "Cholesterol into membranes and hormones", "Transfer", {"Cholesterol": 1}, {}, kcat=1.0, km=0.4)],
+   "Cholesterol biosynthesis; statin target and SLOS as in clinical texts")
+
+_p("pyruvate", "Pyruvate at the crossroads",
+   "Where sugar breakdown meets the TCA cycle, fat synthesis and lactate. A block here forces everything into lactate "
+   "and is a common cause of congenital lactic acidosis.",
+   ["Pyr", "AcCoA", "Lac", "OAA", "NAD", "NADH", "CoA", "CO2"], ["Pyr", "CO2"],
+   [R("pdh", "Pyruvate dehydrogenase complex", "PDH", {"Pyr": 1, "CoA": 1, "NAD": 1}, {"AcCoA": 1, "NADH": 1, "CO2": 1},
+      kcat=1.2, km=0.3,
+      regulators=[{"species": "AcCoA", "effect": "inhibit", "k": 0.8}],
+      deficiency="PDH complex deficiency: pyruvate cannot enter the TCA cycle, so lactate rises; the ketogenic diet bypasses it by supplying acetyl-CoA from fat",
+      drugs=[{"name": "Thiamine", "effect": "activates", "note": "cofactor; some forms respond"},
+             {"name": "Dichloroacetate", "effect": "activates", "note": "keeps the complex switched on"}]),
+    R("ldh", "Lactate dehydrogenase", "LDH", {"Pyr": 1, "NADH": 1}, {"Lac": 1, "NAD": 1}, kcat=1.5, km=0.3,
+      reversible=True),
+    R("pc", "Pyruvate carboxylase", "PC", {"Pyr": 1, "CO2": 1}, {"OAA": 1}, kcat=0.8, km=0.3,
+      deficiency="Pyruvate carboxylase deficiency: lactic acidosis and failure to refill the TCA cycle"),
+    R("lac_out", "Lactate to the blood", "Export", {"Lac": 1}, {}, kcat=1.0, km=0.4),
+    R("accoa_out", "Acetyl-CoA to the TCA cycle", "Transfer", {"AcCoA": 1}, {"CoA": 1}, kcat=1.5, km=0.4),
+    R("oaa_out", "Oxaloacetate to the TCA cycle", "Transfer", {"OAA": 1}, {}, kcat=1.5, km=0.4),
+    R("nadh_ox", "NADH reoxidation", "Respiration", {"NADH": 1}, {"NAD": 1}, kcat=1.5, km=0.3)],
+   "Pyruvate metabolism; PDH deficiency as in clinical genetics texts")
+
+_p("alcohol", "Alcohol metabolism",
+   "Breaking down ethanol, and the two enzymes behind the flushing reaction and the disulfiram reaction. Methanol "
+   "poisoning is treated by competing for the first enzyme.",
+   ["EtOH", "Acetaldehyde", "Acetate", "NAD", "NADH", "MeOH", "Formaldehyde", "Formate"], ["EtOH", "MeOH"],
+   [R("adh", "Alcohol dehydrogenase", "ADH", {"EtOH": 1, "NAD": 1}, {"Acetaldehyde": 1, "NADH": 1}, kcat=1.2, km=0.3,
+      drugs=[{"name": "Fomepizole", "effect": "inhibits", "note": "blocks this enzyme in methanol or ethylene glycol poisoning so the toxic products never form"}]),
+    R("aldh", "Aldehyde dehydrogenase 2", "ALDH2", {"Acetaldehyde": 1, "NAD": 1}, {"Acetate": 1, "NADH": 1},
+      kcat=1.5, km=0.3,
+      deficiency="ALDH2 variant, common in East Asia: acetaldehyde accumulates, causing the flushing reaction and raising oesophageal cancer risk",
+      drugs=[{"name": "Disulfiram", "effect": "inhibits", "note": "blocks this step deliberately, so drinking causes an unpleasant reaction"}]),
+    R("adh_meoh", "Alcohol dehydrogenase acting on methanol", "ADH", {"MeOH": 1, "NAD": 1},
+      {"Formaldehyde": 1, "NADH": 1}, kcat=0.6, km=0.4,
+      drugs=[{"name": "Fomepizole", "effect": "inhibits", "note": "the block that prevents blindness in methanol poisoning"},
+             {"name": "Ethanol", "effect": "inhibits", "note": "the older antidote: competes for the same enzyme"}]),
+    R("faldh", "Formaldehyde to formate", "ALDH", {"Formaldehyde": 1}, {"Formate": 1}, kcat=1.5, km=0.3),
+    R("acetate_out", "Acetate onward", "Transfer", {"Acetate": 1}, {}, kcat=1.5, km=0.4),
+    R("formate_out", "Formate cleared (slowly)", "Folate-dependent", {"Formate": 1}, {}, kcat=0.5, km=0.4),
+    R("nadh_ox", "NADH reoxidation", "Respiration", {"NADH": 1}, {"NAD": 1}, kcat=1.5, km=0.3)],
+   "Ethanol and methanol metabolism; antidotes as in clinical toxicology texts")
+
+_p("polyol", "Polyol (sorbitol) pathway",
+   "The overflow route that turns excess glucose into sorbitol. It runs hard in diabetes and is blamed for cataract "
+   "and nerve damage, which is why aldose reductase inhibitors were developed.",
+   ["Glc", "Sorbitol", "Fru", "NADPH", "NADP", "NAD", "NADH"], ["Glc", "NADPH", "NADP", "NAD", "NADH"],
+   [R("akr1b1", "Aldose reductase", "AKR1B1", {"Glc": 1, "NADPH": 1}, {"Sorbitol": 1, "NADP": 1}, kcat=1.0, km=0.6,
+      drugs=[{"name": "Epalrestat", "effect": "inhibits", "note": "aldose reductase inhibitor used for diabetic neuropathy in some countries"}]),
+    R("sord", "Sorbitol dehydrogenase", "SORD", {"Sorbitol": 1, "NAD": 1}, {"Fru": 1, "NADH": 1}, kcat=1.0, km=0.4,
+      deficiency="Sorbitol dehydrogenase deficiency: sorbitol accumulates, causing a hereditary neuropathy"),
+    R("fru_out", "Fructose into glycolysis", "Transfer", {"Fru": 1}, {}, kcat=1.5, km=0.4)],
+   "Polyol pathway; diabetic complications as in clinical texts")
+
+_p("propionate", "Propionate to succinyl-CoA",
+   "Where odd-chain fats and several amino acids join the TCA cycle. Two blocks here are the classic organic "
+   "acidemias, and one of them responds to vitamin B12.",
+   ["PropCoA", "MethylmalonylCoA", "SucCoA", "CO2", "ATP", "ADP", "B12"], ["CO2", "ATP", "ADP", "B12"],
+   [R("supply", "Propionyl-CoA from amino acids and odd-chain fat", "Upstream", {}, {"PropCoA": 1}, kcat=0.4),
+    R("pcc", "Propionyl-CoA carboxylase", "PCC", {"PropCoA": 1, "CO2": 1, "ATP": 1},
+      {"MethylmalonylCoA": 1, "ADP": 1}, kcat=1.2, km=0.3,
+      deficiency="Propionic acidemia: propionyl-CoA accumulates, causing acidosis, hyperammonaemia and cardiomyopathy; biotin is its cofactor",
+      drugs=[{"name": "Biotin", "effect": "activates", "note": "cofactor; helps in some multiple carboxylase forms"}]),
+    R("mut", "Methylmalonyl-CoA mutase", "MMUT", {"MethylmalonylCoA": 1, "B12": 1}, {"SucCoA": 1, "B12": 1},
+      kcat=1.2, km=0.3,
+      deficiency="Methylmalonic acidemia: methylmalonic acid accumulates; some forms are B12-responsive",
+      drugs=[{"name": "Hydroxocobalamin (B12)", "effect": "activates", "note": "restores the cofactor in responsive forms"}]),
+    R("suc_out", "Succinyl-CoA to the TCA cycle", "Transfer", {"SucCoA": 1}, {}, kcat=1.5, km=0.4)],
+   "Propionate metabolism; organic acidemias as in clinical genetics texts")
+
+_p("catecholamine", "Catecholamine synthesis",
+   "Making dopamine, noradrenaline and adrenaline from tyrosine. It is the pathway Parkinson's treatment works on, "
+   "and where PKU's tyrosine shortage bites.",
+   ["Tyr", "LDOPA", "Dopamine", "NE", "Epi", "BH4", "HVA"], ["Tyr", "BH4"],
+   [R("th", "Tyrosine hydroxylase", "TH", {"Tyr": 1, "BH4": 1}, {"LDOPA": 1, "BH4": 1}, kcat=0.8, km=0.4,
+      deficiency="Tyrosine hydroxylase deficiency: dopamine cannot be made, causing a dystonia that responds to L-DOPA",
+      drugs=[{"name": "Metyrosine", "effect": "inhibits", "note": "deliberately blocks catecholamine synthesis before phaeochromocytoma surgery"}]),
+    R("aadc", "Aromatic amino acid decarboxylase", "DDC", {"LDOPA": 1}, {"Dopamine": 1}, kcat=1.5, km=0.3,
+      deficiency="AADC deficiency: severe movement disorder from infancy; now treatable by gene therapy",
+      drugs=[{"name": "Carbidopa", "effect": "inhibits", "note": "blocks this step outside the brain so more L-DOPA reaches it"}]),
+    R("dbh", "Dopamine beta-hydroxylase", "DBH", {"Dopamine": 1}, {"NE": 1}, kcat=1.0, km=0.3,
+      deficiency="DBH deficiency: no noradrenaline, causing severe orthostatic hypotension"),
+    R("pnmt", "Phenylethanolamine N-methyltransferase", "PNMT", {"NE": 1}, {"Epi": 1}, kcat=1.0, km=0.3),
+    R("mao", "Monoamine oxidase and COMT", "MAO-COMT", {"Dopamine": 1}, {"HVA": 1}, kcat=1.0, km=0.3,
+      drugs=[{"name": "Selegiline", "effect": "inhibits", "note": "slows dopamine breakdown in Parkinson's disease"},
+             {"name": "Entacapone", "effect": "inhibits", "note": "blocks the COMT side of the same disposal route"}]),
+    R("ne_use", "Noradrenaline released and cleared", "Transfer", {"NE": 1}, {}, kcat=1.2, km=0.4),
+    R("epi_use", "Adrenaline released and cleared", "Transfer", {"Epi": 1}, {}, kcat=1.2, km=0.4),
+    R("hva_out", "Homovanillic acid excreted", "Export", {"HVA": 1}, {}, kcat=1.5, km=0.4)],
+   "Catecholamine synthesis and breakdown; drugs as in clinical pharmacology texts")
+
+
+def _apply_tuning():
+    """Rate constants balanced by tools/balance.py so each pathway reaches a steady state."""
+    import json
+    from pathlib import Path
+    f = Path(__file__).resolve().parent / "rate_tuning.json"
+    if not f.exists():
+        return
+    tuned = json.loads(f.read_text())
+    for pid, path in PATHWAYS.items():
+        for r in path["reactions"]:
+            if pid in tuned and r["id"] in tuned[pid]:
+                r["kcat"] = tuned[pid][r["id"]]
+
+
+_apply_tuning()
+
+
 def _complex_key(d):
     return tuple(sorted(d.items()))
 
@@ -679,6 +1045,15 @@ def _compare(sp, base, run, label, tol):
     return {"label": label, "changes": changes[:8], "fluxes": fl[:6], "settled": run["steady"]}
 
 
+def _merged_tuning():
+    import json
+    from pathlib import Path
+    f = Path(__file__).resolve().parent / "rate_tuning.json"
+    if not f.exists():
+        return {}
+    return json.loads(f.read_text()).get("all", {})
+
+
 def merged(pids=None):
     """All pathways joined into one network through the metabolites they share."""
     pids = list(pids or PATHWAYS)
@@ -705,6 +1080,10 @@ def merged(pids=None):
             producers.update(r["products"])
     environment = {"Glc", "Pi", "CO2", "H", "AMP", "GDP", "Asp", "PRPP", "Ado", "O2"}
     clamped = [sp for sp in species if (all(clamped_votes[sp]) and sp not in producers) or sp in environment]
+    tuned = _merged_tuning()
+    for r in reactions:
+        if r["id"] in tuned:
+            r["kcat"] = tuned[r["id"]]
     return {"id": "all", "name": "Whole metabolism (all pathways joined)",
             "description": "Every pathway in the app merged into one network through the metabolites they share, so a "
                            "change in one pathway can be followed into the others. Reactions that appear in more than "
@@ -722,3 +1101,111 @@ def affected_pathways(path, changes):
         for pid in org.get(c["species"], []):
             out.setdefault(pid, []).append(c["species"])
     return {k: sorted(set(v)) for k, v in out.items()}
+
+
+def _levels(run, species):
+    return {s: v for s, v in zip(species, run["final"])}
+
+
+def strategies(path, reaction_id, residual=0.05, steps=3000, top=8):
+    """Given an enzyme that has failed, try the standard therapeutic moves in the model and rank them.
+
+    The moves mirror how metabolic disease is actually treated: restore the enzyme, reduce what flows in,
+    block a step further up, drain the toxic metabolite, supply what is missing downstream, or push an
+    alternative route.
+    """
+    sp = path["species"]
+    rxn = next((r for r in path["reactions"] if r["id"] == reaction_id), None)
+    if rxn is None:
+        return None
+    ids = [r["id"] for r in path["reactions"]]
+    j = ids.index(reaction_id)
+    healthy = simulate_pathway(path, steps=steps, record=False)
+    sick_scale = [residual if i == j else 1.0 for i in range(len(ids))]
+    sick = simulate_pathway(path, steps=steps, enzyme_scale=sick_scale, record=False)
+    h, d = _levels(healthy, sp), _levels(sick, sp)
+    toxin, tox_fold = None, 1.0
+    for s in sp:
+        if s in path["clamped"]:
+            continue
+        fold = (d[s] + 1e-4) / (h[s] + 1e-4)
+        if fold > tox_fold and d[s] > 0.05:
+            toxin, tox_fold = s, fold
+    exits = [r["id"] for r in path["reactions"] if not r["products"]]
+    out_flux = max(exits, key=lambda k: healthy["flux"][k]) if exits else max(healthy["flux"], key=lambda k: healthy["flux"][k])
+    h_out, d_out = healthy["flux"][out_flux], sick["flux"][out_flux]
+
+    def score(run):
+        lv = _levels(run, sp)
+        s_tox = 1.0
+        if toxin:
+            span = max(np.log((d[toxin] + 1e-4) / (h[toxin] + 1e-4)), 1e-6)
+            s_tox = 1 - min(max(np.log((lv[toxin] + 1e-4) / (h[toxin] + 1e-4)), 0) / span, 1)
+        gap = max(h_out - d_out, 1e-6)
+        s_flux = min(max((run["flux"][out_flux] - d_out) / gap, 0), 1.2)
+        return round(float(0.6 * s_tox + 0.4 * s_flux), 3), round(float(lv[toxin]) if toxin else 0.0, 3), \
+            round(float(run["flux"][out_flux]), 3)
+
+    def run_with(scale=None, clamp=None, c0=None, extra_exit=None):
+        p2 = dict(path)
+        p2["reactions"] = list(path["reactions"])
+        if extra_exit:
+            p2["reactions"] = p2["reactions"] + [R(f"scav_{extra_exit}", f"Scavenger drug removing {extra_exit}",
+                                                   "Scavenger", {extra_exit: 1}, {}, kcat=1.5, km=0.3)]
+            scale = (scale or [1.0] * len(ids)) + [1.0]
+        if clamp:
+            p2["clamped"] = sorted(set(path["clamped"]) | {clamp})
+        return simulate_pathway(p2, steps=steps, enzyme_scale=scale, c0=c0, record=False)
+
+    cands = []
+    base_scale = list(sick_scale)
+
+    for lvl, name in ((0.3, "partly"), (1.0, "fully")):
+        sc = list(base_scale)
+        sc[j] = lvl
+        cands.append({"move": "Restore the missing enzyme " + name,
+                      "mechanism": "enzyme replacement, gene therapy, or a chaperone or vitamin that raises residual activity",
+                      "target": rxn["enzyme"], "run": run_with(sc)})
+    for i, r in enumerate(path["reactions"]):
+        if i == j:
+            continue
+        for f, label, mech in ((0.3, "Block", "substrate reduction or a deliberate downstream block, as nitisinone does in tyrosinemia"),
+                               (2.5, "Boost", "push an alternative route, by induction or by supplying a cofactor")):
+            sc = list(base_scale)
+            sc[i] = f
+            cands.append({"move": f"{label} {r['enzyme']} ({r['name']})", "mechanism": mech,
+                          "target": r["enzyme"], "reaction": r["id"], "run": run_with(sc)})
+    if toxin:
+        cands.append({"move": f"Drain {toxin} with a scavenger", "target": toxin,
+                      "mechanism": "a drug that carries the accumulating metabolite out, as benzoate and phenylbutyrate do for ammonia",
+                      "run": run_with(base_scale, extra_exit=toxin)})
+    for s in rxn["products"]:
+        c0 = initial_state(path)
+        c0[s] = max(h.get(s, 0.5), 0.5)
+        cands.append({"move": f"Supply {s} directly", "target": s,
+                      "mechanism": "give the missing product, as uridine does in orotic aciduria and cholesterol in Smith-Lemli-Opitz",
+                      "run": run_with(base_scale, clamp=s, c0=c0)})
+    for s in path["clamped"]:
+        c0 = initial_state(path)
+        c0[s] = c0[s] / 3.0
+        cands.append({"move": f"Restrict {s} in the diet", "target": s,
+                      "mechanism": "dietary restriction, as in PKU, galactosemia and hereditary fructose intolerance",
+                      "run": run_with(base_scale, c0=c0)})
+
+    named = {}
+    for r in path["reactions"]:
+        for dr in r.get("drugs", []):
+            named.setdefault(r["enzyme"], []).append(dr)
+    rows = []
+    for c in cands:
+        sc, tox_after, flux_after = score(c["run"])
+        real = named.get(c.get("target"), [])
+        rows.append({"move": c["move"], "mechanism": c["mechanism"], "score": sc, "toxin_after": tox_after,
+                     "flux_after": flux_after, "settled": c["run"]["steady"],
+                     "known_drugs": [d["name"] for d in real]})
+    rows.sort(key=lambda r: -r["score"])
+    return {"enzyme": rxn["enzyme"], "reaction": rxn["name"], "deficiency": rxn.get("deficiency"),
+            "toxin": toxin, "toxin_healthy": round(float(h[toxin]), 3) if toxin else None,
+            "toxin_disease": round(float(d[toxin]), 3) if toxin else None,
+            "output": out_flux, "output_healthy": round(float(h_out), 3), "output_disease": round(float(d_out), 3),
+            "residual": residual, "strategies": rows[:top], "tried": len(rows)}

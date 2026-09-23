@@ -22,7 +22,7 @@ from typing import Literal
 from .engine import ARMS, DEFAULTS, MEMBRANES, TASKS, Cancelled, run_job
 from .explain import LABEL, explain
 from .pathways import (PATHWAYS, analyse, cypher, deeper, graph as pathway_graph, merged, simulate_pathway,
-                        what_if)
+                        strategies, what_if)
 from .workspace import (LAYER_TYPES, code_workspace, compile_workspace, default_workspace, from_model,
                         from_pathway, new_layer, run_workspace, waveform)
 from .model import THERAPY, code_numpy, code_torch, graph, probe, reachability, simulate, therapy
@@ -520,6 +520,16 @@ def neo4j_push(body: dict):
     except Exception as e:
         raise HTTPException(502, f"Neo4j rejected the load: {e}")
     return {"pushed": done, "uri": cfg["uri"], "database": cfg["database"]}
+
+
+@app.get("/api/pathways/{pid}/strategies")
+def pathway_strategies(pid: str, node: str):
+    p = _path(pid)
+    rid = node.split(":", 1)[1] if ":" in node else node
+    out = strategies(p, rid)
+    if out is None:
+        raise HTTPException(404, "No such enzyme step in this pathway")
+    return out
 
 
 @app.get("/api/pathways/{pid}/simulate")

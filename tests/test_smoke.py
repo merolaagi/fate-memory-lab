@@ -226,7 +226,7 @@ def test_pathway_deeper_analysis():
 def test_pathway_graph_cypher_and_whatif():
     from app.pathways import PATHWAYS, cypher, graph, what_if
 
-    assert len(PATHWAYS) == 8
+    assert len(PATHWAYS) >= 8
     for pid, p in PATHWAYS.items():
         g = graph(p)
         assert len(g["nodes"]) == len(p["species"]) + len(p["reactions"])
@@ -283,3 +283,29 @@ def test_query_panel_is_read_only(tmp_path, monkeypatch):
         assert client.post("/api/neo4j/query", json={"cypher": ""}).status_code == 400
         assert client.get("/api/pathways").json()[-1]["id"] == "all"
         assert "IS]->(c)" in client.get("/api/pathways/purine/cypher").json()["cypher"]
+
+
+def test_all_pathways_balanced_and_annotated():
+    from app.pathways import PATHWAYS, merged, simulate_pathway
+
+    assert len(PATHWAYS) >= 26
+    annotated = sum(1 for p in PATHWAYS.values() for r in p["reactions"] if r.get("deficiency"))
+    drugged = sum(1 for p in PATHWAYS.values() for r in p["reactions"] if r.get("drugs"))
+    assert annotated > 40 and drugged > 20
+    for pid, p in PATHWAYS.items():
+        run = simulate_pathway(p, steps=4000, record=False)
+        assert run["residual"] < 0.05, f"{pid} did not settle"
+        assert max(run["final"]) < 10, f"{pid} blew up"
+    m = simulate_pathway(merged(), steps=8000, record=False)
+    assert m["steady"] and max(m["final"]) < 10
+
+
+def test_strategy_engine_finds_substrate_reduction():
+    from app.pathways import PATHWAYS, strategies
+
+    r = strategies(PATHWAYS["sphingolipid"], "gba")
+    assert r["toxin"] == "GlcCer" and r["toxin_disease"] > 10 * r["toxin_healthy"]
+    moves = {s["move"]: s for s in r["strategies"]}
+    assert any("Restore the missing enzyme fully" in m for m in moves)
+    assert any("UGCG" in m for m in moves), "substrate reduction should rank in the top moves"
+    assert strategies(PATHWAYS["phe"], "nope") is None
