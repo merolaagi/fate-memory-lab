@@ -9,3 +9,8 @@ data/runs/*
 .pytest_cache/
 data/workspaces/*
 !data/workspaces/.keep
+data/benchmark.json
+data/research/*
+!data/research/.keep
+data/settings.json
+data/settings.tmp

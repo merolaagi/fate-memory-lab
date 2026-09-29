@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
@@ -22,9 +22,11 @@ from typing import Literal
 from .engine import ARMS, DEFAULTS, MEMBRANES, TASKS, Cancelled, run_job
 from .explain import LABEL, explain
 from .pathways import (PATHWAYS, analyse, cypher, deeper, graph as pathway_graph, merged, simulate_pathway,
-                        strategies, what_if)
+                        benchmark as run_benchmark, strategies, target_search, what_if)
 from .workspace import (LAYER_TYPES, code_workspace, compile_workspace, default_workspace, from_model,
                         from_pathway, new_layer, run_workspace, waveform)
+from . import research as RS
+from . import settings as ST
 from .model import THERAPY, code_numpy, code_torch, graph, probe, reachability, simulate, therapy
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -167,6 +169,7 @@ def _recover():
 @asynccontextmanager
 async def lifespan(app):
     _recover()
+    RS.load_all()
     threading.Thread(target=_worker, daemon=True).start()
     yield
 
@@ -440,7 +443,7 @@ def _path(pid):
 @app.get("/api/pathways")
 def list_pathways():
     out = [{"id": p["id"], "name": p["name"], "description": p["description"], "species": len(p["species"]),
-            "reactions": len(p["reactions"])} for p in PATHWAYS.values()]
+            "reactions": len(p["reactions"]), "research": bool(p.get("from_research"))} for p in PATHWAYS.values()]
     m = _path("all")
     out.append({"id": "all", "name": m["name"], "description": m["description"], "species": len(m["species"]),
                 "reactions": len(m["reactions"])})
@@ -480,8 +483,8 @@ def pathway_whatif(pid: str, node: str):
 
 
 def _neo4j_settings():
-    return {"uri": os.environ.get("NEO4J_URI", ""), "user": os.environ.get("NEO4J_USER", "neo4j"),
-            "password": os.environ.get("NEO4J_PASSWORD", ""), "database": os.environ.get("NEO4J_DATABASE", "neo4j")}
+    return {"uri": ST.get("neo4j_uri"), "user": ST.get("neo4j_user"), "password": ST.get("neo4j_password"),
+            "database": ST.get("neo4j_database")}
 
 
 @app.get("/api/neo4j/status")
@@ -504,7 +507,7 @@ def neo4j_push(body: dict):
     except ImportError:
         raise HTTPException(409, "The neo4j driver is not installed. Run: .venv/bin/pip install neo4j")
     if not cfg["uri"] or not cfg["password"]:
-        raise HTTPException(409, "Set NEO4J_URI and NEO4J_PASSWORD (and NEO4J_USER if it is not neo4j) before pushing.")
+        raise HTTPException(409, "Add your Neo4j address and password in Settings before pushing.")
     pids = [body.get("pathway")] if body.get("pathway") in PATHWAYS else list(PATHWAYS)
     done = {}
     try:
@@ -572,8 +575,12 @@ def list_workspaces():
 
 @app.get("/api/workspaces/meta")
 def workspace_meta():
-    return {"layer_types": LAYER_TYPES, "pathways": [{"id": p["id"], "name": p["name"], "species": p["species"]}
-                                                     for p in PATHWAYS.values()]}
+    lt = json.loads(json.dumps(LAYER_TYPES))
+    for f in lt["pathway"]["fields"]:
+        if f[0] == "pathway":
+            f[2] = list(PATHWAYS)
+    return {"layer_types": lt, "pathways": [{"id": p["id"], "name": p["name"], "species": p["species"]}
+                                            for p in PATHWAYS.values()]}
 
 
 @app.post("/api/workspaces")
@@ -684,7 +691,7 @@ def neo4j_query(body: dict):
     except ImportError:
         raise HTTPException(409, "The neo4j driver is not installed. Run: .venv/bin/pip install neo4j")
     if not cfg["uri"] or not cfg["password"]:
-        raise HTTPException(409, "Set NEO4J_URI and NEO4J_PASSWORD before querying.")
+        raise HTTPException(409, "Add your Neo4j address and password in Settings before querying.")
     try:
         with GraphDatabase.driver(cfg["uri"], auth=(cfg["user"], cfg["password"])) as driver:
             with driver.session(database=cfg["database"]) as session:
@@ -696,3 +703,247 @@ def neo4j_query(body: dict):
         raise HTTPException(502, f"Neo4j rejected the query: {e}")
     cols = sorted({k for r in rows for k in r})
     return {"columns": cols, "rows": [{k: str(r.get(k, "")) for k in cols} for r in rows], "count": len(rows)}
+
+
+BENCH = Path(os.environ.get("FML_BENCH", ROOT / "data" / "benchmark.json"))
+_bench_state = {"status": "idle", "progress": 0.0, "where": ""}
+
+
+def _bench_worker():
+    def progress(frac, where):
+        _bench_state.update(progress=round(frac, 3), where=where)
+    try:
+        out = run_benchmark(progress=progress, steps=1500)
+        out["finished"] = time.time()
+        BENCH.write_text(json.dumps(out))
+        _bench_state.update(status="done", progress=1.0, where="")
+    except Exception as e:
+        _bench_state.update(status="failed", where=str(e)[:200])
+
+
+@app.post("/api/benchmark")
+def start_benchmark():
+    if _bench_state["status"] == "running":
+        return _bench_state
+    _bench_state.update(status="running", progress=0.0, where="starting")
+    threading.Thread(target=_bench_worker, daemon=True).start()
+    return _bench_state
+
+
+@app.get("/api/benchmark")
+def get_benchmark():
+    out = dict(_bench_state)
+    if BENCH.exists():
+        out["result"] = json.loads(BENCH.read_text())
+        if out["status"] == "idle":
+            out["status"] = "done"
+    return out
+
+
+class Paper(BaseModel):
+    id: str = ""
+    title: str = ""
+    abstract: str = ""
+    authors: str = ""
+    journal: str | None = ""
+    year: str | None = ""
+    link: str | None = ""
+    doi: str | None = ""
+    pmcid: str | None = ""
+    preprint: bool = False
+
+
+class ReadRequest(BaseModel):
+    paper: Paper
+    text: str = ""
+    reader: Literal["auto", "keywords", "claude"] = "auto"
+
+
+class BuildRequest(BaseModel):
+    paper: Paper
+    reading: dict = Field(default_factory=dict)
+    recipe: dict
+    name: str = ""
+
+
+@app.get("/api/research/status")
+def research_status():
+    return {"claude": bool(ST.get("anthropic_api_key")), "model": ST.get("anthropic_model"),
+            "templates": len(RS.TEMPLATES)}
+
+
+@app.get("/api/research/templates")
+def research_templates():
+    return [{"id": t["id"], "name": t["name"], "family": t["family"], "description": t["description"],
+             "species": t["species"], "reactions": [{"id": r["id"], "name": r["name"], "law": r.get("law", "mm"),
+                                                    "rate": r["kcat"]} for r in t["reactions"]],
+             "reference": t["reference"]} for t in RS.TEMPLATES.values()]
+
+
+@app.get("/api/research/search")
+def research_search(q: str, since: int | None = None, oa: bool = False, preprints: bool = True, n: int = 15):
+    if not q.strip():
+        raise HTTPException(400, "Type something to search for.")
+    try:
+        return RS.europe_pmc(q, page_size=max(1, min(n, 40)), preprints=preprints, open_access=oa, since=since)
+    except Exception as e:
+        raise HTTPException(502, f"Europe PMC could not be reached: {e}")
+
+
+@app.post("/api/research/read")
+def research_read(req: ReadRequest):
+    text = (req.paper.title + ". " + req.paper.abstract + "\n\n" + req.text).strip()
+    use_claude = req.reader == "claude" or (req.reader == "auto" and ST.get("anthropic_api_key"))
+    if use_claude:
+        try:
+            out = RS.read_with_claude(req.paper.title, text)
+            if out is not None:
+                out["keywords"] = RS.read_keywords(text)["matches"]
+                return out
+            if req.reader == "claude":
+                raise HTTPException(409, "Add your Anthropic API key in Settings to read papers with Claude.")
+        except HTTPException:
+            raise
+        except Exception as e:
+            fallback = RS.read_keywords(text)
+            fallback["caveat"] = f"Claude could not read this paper ({e}); fell back to the keyword reader. " + fallback["caveat"]
+            return fallback
+    return RS.read_keywords(text)
+
+
+def _model_view(rec, feas=None):
+    feas = feas or RS.feasibility(rec["pathway"], stated=len(rec["recipe"].get("overrides") or {}))
+    return {"id": rec["id"], "pid": rec["pid"], "name": rec["pathway"]["name"], "paper": rec["paper"],
+            "reading": rec["reading"], "recipe": rec["recipe"], "family": rec["pathway"].get("family"),
+            "reactions": [{"id": r["id"], "name": r["name"], "law": r.get("law", "mm"), "rate": r["kcat"],
+                           "substrates": r["substrates"], "products": r["products"], "evidence": r.get("evidence", "")}
+                          for r in rec["pathway"]["reactions"]],
+            "feasibility": feas, "created": rec["created"]}
+
+
+@app.post("/api/research/models")
+def research_build(req: BuildRequest):
+    rec_recipe = req.recipe
+    if not rec_recipe.get("template") and not rec_recipe.get("custom"):
+        raise HTTPException(400, "Nothing to build: the reading did not find a model.")
+    if rec_recipe.get("template") and rec_recipe["template"] not in RS.TEMPLATES:
+        raise HTTPException(400, "Unknown model family.")
+    rec, feas = RS.save_model(req.paper.model_dump(), req.reading, rec_recipe, req.name or None)
+    return _model_view(rec, feas)
+
+
+@app.post("/api/research/models/template")
+def research_from_template(body: dict):
+    tid = body.get("template")
+    if tid not in RS.TEMPLATES:
+        raise HTTPException(400, "Unknown model family.")
+    paper = {"title": RS.TEMPLATES[tid]["name"], "abstract": RS.TEMPLATES[tid]["description"],
+             "authors": RS.TEMPLATES[tid]["reference"], "link": ""}
+    rec, feas = RS.save_model(paper, {"reader": "library"}, {"template": tid, "overrides": body.get("overrides") or {}},
+                              body.get("name") or None)
+    return _model_view(rec, feas)
+
+
+@app.get("/api/research/models")
+def research_models():
+    return [{"id": r["id"], "pid": r["pid"], "name": r["pathway"]["name"], "family": r["pathway"].get("family"),
+             "verdict": r.get("feasibility", {}).get("verdict", ""), "created": r["created"]} for r in RS.load_all()]
+
+
+@app.get("/api/research/models/{mid}")
+def research_model(mid: str):
+    f = RS.STORE / f"{mid}.json"
+    if not f.exists() or "/" in mid:
+        raise HTTPException(404, "No such research model")
+    return _model_view(json.loads(f.read_text()))
+
+
+@app.delete("/api/research/models/{mid}")
+def research_delete(mid: str):
+    if not RS.delete_model(mid):
+        raise HTTPException(404, "No such research model")
+    return {"deleted": mid}
+
+
+@app.get("/api/pathways/{pid}/targets")
+def pathway_targets(pid: str, species: str, direction: Literal["lower", "raise"] = "lower"):
+    out = target_search(_path(pid), species, direction)
+    if out is None:
+        raise HTTPException(404, "No such species in this model")
+    return out
+
+
+def _may_change_settings(request: Request):
+    """Settings hold secrets, so changes are refused from the open internet.
+
+    Allowed from the Mac itself, or through Cloudflare Tunnel only when Cloudflare Access has signed the visitor in.
+    Requests that came through the tunnel carry a Cf-Connecting-Ip header; Access adds the signed-in email.
+    """
+    through_tunnel = "cf-connecting-ip" in request.headers
+    if not through_tunnel:
+        host = request.client.host if request.client else ""
+        return host in ("127.0.0.1", "::1", "localhost", "testclient")
+    return bool(request.headers.get("cf-access-authenticated-user-email"))
+
+
+@app.get("/api/settings")
+def get_settings(request: Request):
+    out = ST.view()
+    out["can_edit"] = _may_change_settings(request)
+    return out
+
+
+@app.put("/api/settings")
+def put_settings(body: dict, request: Request):
+    if not _may_change_settings(request):
+        raise HTTPException(403, "Settings can only be changed from the Mac itself (http://127.0.0.1:47431) or through "
+                                 "Cloudflare Access. Protect fml.fueldeskpro.com with an Access policy to edit them remotely.")
+    model = (body.get("values") or {}).get("anthropic_model")
+    if model and model not in ST.MODELS:
+        raise HTTPException(400, "Unknown model.")
+    out = ST.update(body)
+    out["can_edit"] = True
+    return out
+
+
+@app.post("/api/settings/test/anthropic")
+def test_anthropic(request: Request):
+    if not _may_change_settings(request):
+        raise HTTPException(403, "Testing the key is only allowed where settings can be changed.")
+    key = ST.get("anthropic_api_key")
+    if not key:
+        raise HTTPException(409, "No Anthropic API key is set.")
+    import httpx
+    try:
+        r = httpx.post("https://api.anthropic.com/v1/messages",
+                       headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                       json={"model": ST.get("anthropic_model"), "max_tokens": 8,
+                             "messages": [{"role": "user", "content": "Reply with the word ok."}]}, timeout=30)
+    except Exception as e:
+        raise HTTPException(502, f"Could not reach Anthropic: {e}")
+    if r.status_code == 401:
+        raise HTTPException(400, "Anthropic rejected the key. Check it was copied in full.")
+    if r.status_code == 404:
+        raise HTTPException(400, f"The key works but the model {ST.get('anthropic_model')} is not available to it.")
+    if r.status_code >= 400:
+        raise HTTPException(400, f"Anthropic returned {r.status_code}: {r.text[:200]}")
+    return {"ok": True, "model": ST.get("anthropic_model")}
+
+
+@app.post("/api/settings/test/neo4j")
+def test_neo4j(request: Request):
+    if not _may_change_settings(request):
+        raise HTTPException(403, "Testing the connection is only allowed where settings can be changed.")
+    cfg = _neo4j_settings()
+    if not cfg["uri"] or not cfg["password"]:
+        raise HTTPException(409, "Add the Neo4j address and password first.")
+    try:
+        from neo4j import GraphDatabase
+    except ImportError:
+        raise HTTPException(409, "The neo4j driver is not installed. Run: .venv/bin/pip install neo4j")
+    try:
+        with GraphDatabase.driver(cfg["uri"], auth=(cfg["user"], cfg["password"])) as driver:
+            driver.verify_connectivity()
+    except Exception as e:
+        raise HTTPException(400, f"Neo4j refused the connection: {e}")
+    return {"ok": True, "uri": cfg["uri"]}

@@ -309,3 +309,96 @@ def test_strategy_engine_finds_substrate_reduction():
     assert any("Restore the missing enzyme fully" in m for m in moves)
     assert any("UGCG" in m for m in moves), "substrate reduction should rank in the top moves"
     assert strategies(PATHWAYS["phe"], "nope") is None
+
+
+def test_benchmark_reports_chance_baseline(monkeypatch):
+    import app.pathways as P
+
+    subset = {k: P.PATHWAYS[k] for k in ("heme", "sphingolipid")}
+    monkeypatch.setattr(P, "PATHWAYS", subset)
+    b = P.benchmark(steps=800)
+    assert b["scored"] > 0 and b["expected_top3"] > 0
+    assert set(b) >= {"observed_top3", "expected_top3", "z", "cases"}
+    gba = next(c for c in b["cases"] if c["enzyme"] == "GBA")
+    assert gba["rank"] is not None and gba["rank"] <= 3
+
+
+def test_strategies_report_combinations_and_side_effects():
+    from app.pathways import PATHWAYS, strategies
+
+    r = strategies(PATHWAYS["sphingolipid"], "gba")
+    assert r["combinations"] and "best_single" in r["combinations"][0]
+
+
+def test_research_templates_parse_read_and_build(tmp_path, monkeypatch):
+    monkeypatch.setenv("FML_RESEARCH", str(tmp_path / "research"))
+    import importlib
+    import app.research as RS
+    importlib.reload(RS)
+    from app.pathways import PATHWAYS, target_search
+
+    for tid in RS.TEMPLATES:
+        f = RS.feasibility(RS.template_pathway(tid))
+        assert f["verdict"].startswith("A working model"), tid
+    viral = RS.template_pathway("viral")
+    run = __import__("app.pathways", fromlist=["x"]).simulate_pathway(viral, steps=4000, record=False)
+    assert abs(dict(zip(viral["species"], run["final"]))["T"] - 3.0) < 0.05
+    fixture = {"resultList": {"result": [{"source": "MED", "id": "1", "title": "HIV <i>viral</i> dynamics",
+                                          "authorString": "A B", "pubYear": "2025", "abstractText": "<p>target cell</p>",
+                                          "journalInfo": {"journal": {"title": "J"}}}]}}
+    papers = RS.parse_europe_pmc(fixture)
+    assert papers[0]["title"] == "HIV viral dynamics" and papers[0]["link"].endswith("/MED/1")
+    rd = RS.read_keywords("A target cell limited model of HIV viral load with infected cells half-life of 1.4 days.")
+    assert rd["family"] == "viral" and rd["stated_numbers"]
+    rec, feas = RS.save_model({"title": "t"}, rd, rd["recipe"])
+    assert rec["pid"] in PATHWAYS
+    t = target_search(PATHWAYS[rec["pid"]], "V", "lower", steps=1500)
+    assert t["moves"][0]["change"] < -0.5
+    assert RS.delete_model(rec["id"]) and rec["pid"] not in PATHWAYS
+
+
+def test_llm_output_is_sanitised():
+    import app.research as RS
+
+    raw = {"family": "viral", "template_overrides": {"clear": 23.0, "bogus": 5, "infect": "x"},
+           "stated_parameters": [{"name": "c", "value": "23", "unit": "/day", "sentence": "s"}],
+           "confidence": "medium", "caveats": ["scaled"]}
+    out = RS.sanitise_llm(raw)
+    assert out["recipe"]["overrides"] == {"clear": 23.0}
+    custom = RS.sanitise_custom({"species": [{"name": "X!", "initial": 1}, {"name": "Y"}],
+                                 "reactions": [{"id": "r", "substrates": {"X": 1}, "products": {"Y": 1, "Z": 1},
+                                                "law": "weird", "rate": 1e9}]})
+    assert custom["species"] == ["X", "Y"] and custom["reactions"][0]["law"] == "mass_action"
+    assert custom["reactions"][0]["kcat"] == 1e4 and "Z" not in custom["reactions"][0]["products"]
+
+
+def test_settings_store_masks_secrets_and_guards_writes(tmp_path, monkeypatch):
+    monkeypatch.setenv("FML_SETTINGS", str(tmp_path / "settings.json"))
+    monkeypatch.setenv("FML_DATA", str(tmp_path / "r"))
+    monkeypatch.setenv("FML_WORKSPACES", str(tmp_path / "w"))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    import importlib
+    import os
+    import app.settings as ST
+    importlib.reload(ST)
+    import app.server as server
+    importlib.reload(server)
+    with TestClient(server.app) as client:
+        v = client.get("/api/settings").json()
+        assert v["can_edit"] and not v["anthropic_api_key"]["set"]
+        key = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz-1234"
+        v = client.put("/api/settings", json={"values": {"anthropic_api_key": key, "anthropic_model": "claude-sonnet-5"}}).json()
+        assert v["anthropic_api_key"]["set"] and key not in str(v) and v["anthropic_api_key"]["value"].endswith("1234")
+        assert oct(os.stat(tmp_path / "settings.json").st_mode)[-3:] == "600"
+        assert ST.get("anthropic_api_key") == key
+        assert client.get("/api/research/status").json()["claude"] is True
+        v = client.put("/api/settings", json={"values": {"anthropic_api_key": ""}}).json()
+        assert v["anthropic_api_key"]["set"], "an empty secret field must not wipe the stored key"
+        assert client.put("/api/settings", json={"values": {"anthropic_model": "nope"}}).status_code == 400
+        tunnel = {"cf-connecting-ip": "203.0.113.9"}
+        assert client.put("/api/settings", json={"values": {"neo4j_uri": "x"}}, headers=tunnel).status_code == 403
+        assert client.get("/api/settings", headers=tunnel).json()["can_edit"] is False
+        signed_in = dict(tunnel, **{"cf-access-authenticated-user-email": "me@example.com"})
+        assert client.put("/api/settings", json={"values": {"neo4j_uri": "bolt://localhost:7687"}}, headers=signed_in).status_code == 200
+        v = client.put("/api/settings", json={"clear": ["anthropic_api_key"]}).json()
+        assert not v["anthropic_api_key"]["set"]

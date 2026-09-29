@@ -152,6 +152,11 @@ For each pathway the app reports:
   product, or restrict the dietary input. Each result shows the toxin level and output flux afterwards, and flags
   where the move matches a drug that is actually used.
 
+  The search also tries **combinations** of the best single moves, reporting whether each pair works together or
+  interferes, and on the joined network it reports what the best drug-like move does **elsewhere**, the model's
+  version of side effects. For PKU on the joined network, restricting dietary phenylalanine ranks near the top and
+  also lowers tyrosine in the catecholamine pathway, which is the known reason PKU diets must supplement tyrosine.
+
   This is where the model earns its keep. For Gaucher disease it ranks blocking glucosylceramide synthase among the
   best moves after replacing the enzyme, which is exactly what miglustat and eliglustat do; the model was never told
   those drugs exist for that purpose.
@@ -160,6 +165,70 @@ For each pathway the app reports:
 
 This is where the bench's question meets real biochemistry: the arms compare wiring rules on invented tasks, and the
 pathway analyser reports which of those rules real metabolic networks actually satisfy.
+
+## Research
+
+The **Research** tab connects the lab to current literature and asks whether the math in a paper builds a model.
+
+1. **Search** Europe PMC, which covers PubMed, PubMed Central and the bioRxiv and medRxiv preprint servers, newest
+   first. No key is needed. Preprints are marked as not peer reviewed.
+2. **Read the math.** With an Anthropic key added in Settings, Claude reads the paper and returns a structured
+   recipe: which model family it uses, the rate constants the text actually states with the sentence each came
+   from, and caveats about what the text leaves out. It is told never to invent numbers, and everything it returns
+   is validated before use. Without a key, a keyword reader recognises the model family and lists the sentences that
+   contain numbers, so you can set them by hand. Abstracts rarely contain equations, so paste the paper's methods
+   section for a much better reading.
+3. **Build and test.** The recipe becomes a reaction network and is checked: does it run without blowing up, does it
+   settle, is anything left at the end, and how many rate constants came from the paper rather than defaults. The
+   verdict says plainly when a model shows a paper's mechanism but not its numbers.
+4. **Use it.** A research model joins the Pathways list, so it gets the network view, what-if, the therapy search
+   and Cypher export, and it opens on the Models canvas as a layer you can wire into a larger model and export as
+   code.
+5. **Find drug targets.** Pick the quantity to move (less virus, more antibody, fewer resistant cells) and every step
+   is blocked and boosted in turn, ranked by effect averaged over the run, with side effects on everything else.
+
+Seven model families cover drug and vaccine work, each from a standard source: within-host viral dynamics, vaccine
+antibody response, pharmacokinetics with an Emax effect, enzyme inhibition, a bistable gene switch, a tumour with a
+drug-resistant subpopulation, and an epidemic with vaccination. They can also be built straight from the library.
+Reactions now take one of three rate laws, saturating enzyme kinetics, mass action or Hill, so encounters between
+cells and viruses are modelled correctly.
+
+Two results from the library models are worth knowing about. The viral model settles at exactly the analytic steady
+state for its parameters, a check on the engine. And the drug-target search on the tumour model finds that
+*lowering* the drug dose reduces resistant cells, while sensitive cells multiply: the trade-off at the heart of
+adaptive therapy, reached from the equations alone.
+
+## Settings
+
+**Settings**, at the bottom of the sidebar, is where the Anthropic API key, the Claude model, and the Neo4j address
+and password are entered. They are stored on the server in `data/settings.json`, readable only by your user account,
+excluded from git, and kept across updates. Keys are never sent back to the browser in full; the page shows only the
+start and the last four characters. **Test the key** and **Test the connection** confirm each works before you rely on
+it. A value saved in the app takes precedence over the matching environment variable, and removing it falls back to
+the environment again.
+
+Because settings hold secrets, they can only be changed from the Mac itself (`http://127.0.0.1:47431`) or through the
+public address when Cloudflare Access has signed you in. Anyone reaching the public address without Access sees the
+page read-only. Protecting `fml.fueldeskpro.com` with an Access policy is strongly recommended anyway, since the Research
+tab spends Anthropic credits on your key.
+
+## Testing the method
+
+**Test the method**, at the top of the Pathways tab, runs the strategy search on every enzyme with a known
+deficiency, 66 of them, and asks one question: does a move on another enzyme that a real drug targets land in the
+model's top three? Pathways are small and many enzymes carry drugs, so a random ranking would often score as well.
+The page therefore computes exactly what random ranking would achieve on the same cases, and a z-score for the
+difference.
+
+On the current pathways the model puts a real drug target in its top three in 33 of 38 scoreable cases, against 27.1
+expected by chance (z = 2.26). That is better than chance, modestly. The first version of the scoring weighted
+restoring pathway output as heavily as clearing the toxin and scored 22 against 21.3, no better than chance;
+re-weighting toward clearing the toxin, which is what real substrate-reduction therapies do, is what moved it.
+
+Several of the top-ranked matches are textbook treatment logic the model was not given: blocking ALA synthase in the
+porphyrias (haem arginate, givosiran), blocking glucosylceramide synthase in Gaucher disease (miglustat, eliglustat),
+blocking aldose reductase when sorbitol dehydrogenase fails (epalrestat), and blocking alcohol dehydrogenase when
+ALDH2 fails. Others are coincidences, which is why the chance baseline is there.
 
 ## Neo4j
 

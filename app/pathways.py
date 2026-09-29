@@ -733,20 +733,36 @@ def analyse(path):
 
 
 def rates(path, c, idx, enzyme_scale=None):
+    """Reaction rates. Each reaction picks a rate law:
+    mm           kcat * product of x^k / (Km^k + x^k), saturating enzyme kinetics (the default)
+    mass_action  kcat * product of x^k, for encounters between molecules, cells or viruses
+    hill         kcat * product of x^n / (K^n + x^n), cooperative switch-like response
+    A reaction with no substrates runs at a constant rate kcat (a supply or a birth rate).
+    Regulators multiply the rate: inhibitors by K^n / (K^n + x^n), activators by 0.3 + 0.7 x^n / (K^n + x^n).
+    """
     v = np.zeros((c.shape[0], len(path["reactions"])))
     for j, r in enumerate(path["reactions"]):
-        f = np.full(c.shape[0], r["kcat"])
+        law = r.get("law", "mm")
+        f = np.full(c.shape[0], float(r["kcat"]))
         for s, k in r["substrates"].items():
-            x = c[:, idx[s]]
-            f = f * (x ** k) / (r["km"] ** k + x ** k)
+            x = np.maximum(c[:, idx[s]], 0.0)
+            if law == "mass_action":
+                f = f * x ** k
+            elif law == "hill":
+                n = r.get("n", 2)
+                f = f * x ** n / (r["km"] ** n + x ** n)
+            else:
+                f = f * (x ** k) / (r["km"] ** k + x ** k)
         for g in r["regulators"]:
-            x = c[:, idx[g["species"]]]
-            f = f * (g["k"] / (g["k"] + x) if g["effect"] == "inhibit" else 0.3 + 0.7 * x / (g["k"] + x))
+            x = np.maximum(c[:, idx[g["species"]]], 0.0)
+            n = g.get("n", 1)
+            kk = g["k"] ** n
+            f = f * (kk / (kk + x ** n) if g["effect"] == "inhibit" else 0.3 + 0.7 * x ** n / (kk + x ** n))
         if r["reversible"]:
             b = np.full(c.shape[0], r["kcat"] * 0.4)
             for s, k in r["products"].items():
-                x = c[:, idx[s]]
-                b = b * (x ** k) / (r["km"] ** k + x ** k)
+                x = np.maximum(c[:, idx[s]], 0.0)
+                b = b * (x ** k if law == "mass_action" else (x ** k) / (r["km"] ** k + x ** k))
             f = f - b
         if enzyme_scale is not None:
             f = f * enzyme_scale[j]
@@ -759,6 +775,10 @@ COFACTORS = ("ATP", "NAD", "NADP", "CoA", "OAA", "GDP", "Pi", "Glc", "AcCoA", "G
 
 
 def initial_state(path, level=1.0):
+    if path.get("initial"):
+        c = {s: 0.0 for s in path["species"]}
+        c.update({k: float(v) for k, v in path["initial"].items() if k in c})
+        return c
     c = {s: 0.05 for s in path["species"]}
     for s in path["clamped"]:
         c[s] = level
@@ -1107,7 +1127,32 @@ def _levels(run, species):
     return {s: v for s, v in zip(species, run["final"])}
 
 
-def strategies(path, reaction_id, residual=0.05, steps=3000, top=8):
+def _neighbourhood(path, rid, hops=2, cap=24):
+    """Reactions within a few steps of one reaction, through the metabolites they share."""
+    by_species = {}
+    for r in path["reactions"]:
+        for sp in list(r["substrates"]) + list(r["products"]):
+            by_species.setdefault(sp, []).append(r["id"])
+    start = next((r for r in path["reactions"] if r["id"] == rid), None)
+    if start is None:
+        return set()
+    frontier, seen = {rid}, {rid}
+    for _ in range(hops):
+        nxt = set()
+        for x in frontier:
+            rx = next(r for r in path["reactions"] if r["id"] == x)
+            for sp in list(rx["substrates"]) + list(rx["products"]):
+                for y in by_species.get(sp, []):
+                    if y not in seen:
+                        nxt.add(y)
+        seen |= nxt
+        frontier = nxt
+        if len(seen) >= cap:
+            break
+    return set(list(seen)[:cap])
+
+
+def strategies(path, reaction_id, residual=0.05, steps=3000, top=8, combos=True):
     """Given an enzyme that has failed, try the standard therapeutic moves in the model and rank them.
 
     The moves mirror how metabolic disease is actually treated: restore the enzyme, reduce what flows in,
@@ -1118,6 +1163,10 @@ def strategies(path, reaction_id, residual=0.05, steps=3000, top=8):
     rxn = next((r for r in path["reactions"] if r["id"] == reaction_id), None)
     if rxn is None:
         return None
+    big = len(path["reactions"]) > 30
+    if big:
+        steps = min(steps, 1200)
+        combos = False
     ids = [r["id"] for r in path["reactions"]]
     j = ids.index(reaction_id)
     healthy = simulate_pathway(path, steps=steps, record=False)
@@ -1143,7 +1192,7 @@ def strategies(path, reaction_id, residual=0.05, steps=3000, top=8):
             s_tox = 1 - min(max(np.log((lv[toxin] + 1e-4) / (h[toxin] + 1e-4)), 0) / span, 1)
         gap = max(h_out - d_out, 1e-6)
         s_flux = min(max((run["flux"][out_flux] - d_out) / gap, 0), 1.2)
-        return round(float(0.6 * s_tox + 0.4 * s_flux), 3), round(float(lv[toxin]) if toxin else 0.0, 3), \
+        return round(float(0.85 * s_tox + 0.15 * s_flux), 3), round(float(lv[toxin]) if toxin else 0.0, 3), \
             round(float(run["flux"][out_flux]), 3)
 
     def run_with(scale=None, clamp=None, c0=None, extra_exit=None):
@@ -1163,17 +1212,20 @@ def strategies(path, reaction_id, residual=0.05, steps=3000, top=8):
     for lvl, name in ((0.3, "partly"), (1.0, "fully")):
         sc = list(base_scale)
         sc[j] = lvl
-        cands.append({"move": "Restore the missing enzyme " + name,
+        cands.append({"scale": sc, "kind": "restore",
+                      "move": "Restore the missing enzyme " + name,
                       "mechanism": "enzyme replacement, gene therapy, or a chaperone or vitamin that raises residual activity",
                       "target": rxn["enzyme"], "run": run_with(sc)})
+    near = _neighbourhood(path, reaction_id, hops=2, cap=14) if big else set(ids)
     for i, r in enumerate(path["reactions"]):
-        if i == j:
+        if i == j or r["id"] not in near:
             continue
         for f, label, mech in ((0.3, "Block", "substrate reduction or a deliberate downstream block, as nitisinone does in tyrosinemia"),
                                (2.5, "Boost", "push an alternative route, by induction or by supplying a cofactor")):
             sc = list(base_scale)
             sc[i] = f
-            cands.append({"move": f"{label} {r['enzyme']} ({r['name']})", "mechanism": mech,
+            cands.append({"scale": sc, "kind": "modulate",
+                          "move": f"{label} {r['enzyme']} ({r['name']})", "mechanism": mech,
                           "target": r["enzyme"], "reaction": r["id"], "run": run_with(sc)})
     if toxin:
         cands.append({"move": f"Drain {toxin} with a scavenger", "target": toxin,
@@ -1203,9 +1255,118 @@ def strategies(path, reaction_id, residual=0.05, steps=3000, top=8):
         rows.append({"move": c["move"], "mechanism": c["mechanism"], "score": sc, "toxin_after": tox_after,
                      "flux_after": flux_after, "settled": c["run"]["steady"],
                      "known_drugs": [d["name"] for d in real]})
+    for c, row in zip(cands, rows):
+        row["_scale"] = c.get("scale")
+        row["_kind"] = c.get("kind")
     rows.sort(key=lambda r: -r["score"])
+    pairs = []
+    if combos:
+        singles = [r for r in rows if r.get("_scale") and r["_kind"] == "modulate"][:3]
+        for a in range(len(singles)):
+            for b in range(a + 1, len(singles)):
+                sc = [min(x, y) if x < 1 or y < 1 else max(x, y)
+                      for x, y in zip(singles[a]["_scale"], singles[b]["_scale"])]
+                run = run_with(sc)
+                s2, tox2, flux2 = score(run)
+                pairs.append({"move": f"{singles[a]['move']} + {singles[b]['move']}", "score": s2,
+                              "toxin_after": tox2, "flux_after": flux2, "settled": run["steady"],
+                              "best_single": max(singles[a]["score"], singles[b]["score"]),
+                              "known_drugs": sorted(set(singles[a]["known_drugs"]) | set(singles[b]["known_drugs"]))})
+        pairs.sort(key=lambda r: -r["score"])
+    off = {}
+    if path.get("origin_species") and rows:
+        best = next((r for r in rows if r.get("_kind") == "modulate"), None)
+        if best and best.get("_scale"):
+            run = run_with(best["_scale"])
+            lv = _levels(run, sp)
+            moved = [{"species": s2, "before": round(float(h[s2]), 3), "after": round(float(lv[s2]), 3)}
+                     for s2 in sp if s2 not in path["clamped"] and abs(lv[s2] - h[s2]) > 0.05]
+            off = {"move": best["move"], "pathways": affected_pathways(path, moved), "changes": moved[:10]}
+    for r in rows:
+        r.pop("_scale", None)
+        r.pop("_kind", None)
     return {"enzyme": rxn["enzyme"], "reaction": rxn["name"], "deficiency": rxn.get("deficiency"),
+            "combinations": pairs[:4], "off_target": off,
             "toxin": toxin, "toxin_healthy": round(float(h[toxin]), 3) if toxin else None,
             "toxin_disease": round(float(d[toxin]), 3) if toxin else None,
             "output": out_flux, "output_healthy": round(float(h_out), 3), "output_disease": round(float(d_out), 3),
             "residual": residual, "strategies": rows[:top], "tried": len(rows)}
+
+
+def benchmark(progress=None, steps=1500):
+    """Test the strategy engine against reality, with a chance baseline.
+
+    For every enzyme with a known deficiency, knock it down, rank the moves that act on *other* enzymes, and ask
+    whether a move on an enzyme a real drug targets lands in the top three. Pathways are small and many enzymes
+    carry drugs, so a random ranking would often score too; the expected hits under random ranking are computed
+    exactly and reported alongside, so the comparison is honest.
+    """
+    from math import comb
+    cases = []
+    jobs = [(pid, r) for pid, p in PATHWAYS.items() for r in p["reactions"] if r.get("deficiency")]
+    for n, (pid, r) in enumerate(jobs):
+        if progress:
+            progress((n + 1) / len(jobs), f"{pid}: {r['enzyme']}")
+        res = strategies(PATHWAYS[pid], r["id"], steps=steps, top=100, combos=False)
+        if res is None:
+            continue
+        mods = [s for s in res["strategies"] if s["move"].startswith(("Block", "Boost"))]
+        k, m = sum(1 for s in mods if s["known_drugs"]), len(mods)
+        rank = next((i + 1 for i, s in enumerate(mods) if s["known_drugs"]), None)
+        chance = (1 - comb(m - k, 3) / comb(m, 3)) if (k and m >= 3) else (1.0 if k else 0.0)
+        first = next((s for s in mods if s["known_drugs"]), None)
+        cases.append({"pathway": pid, "enzyme": r["enzyme"], "deficiency": r["deficiency"].split(":")[0],
+                      "toxin": res["toxin"],
+                      "fold": round((res["toxin_disease"] or 0) / max(res["toxin_healthy"] or 1e-6, 1e-6), 1)
+                      if res["toxin"] else None,
+                      "top_move": res["strategies"][0]["move"] if res["strategies"] else None,
+                      "moves": m, "drug_moves": k, "rank": rank, "chance_top3": round(chance, 3),
+                      "matched_move": first["move"] if first else None,
+                      "drugs": sorted(set(first["known_drugs"]))[:4] if first else []})
+    scored = [c for c in cases if c["drug_moves"]]
+    observed = sum(1 for c in scored if c["rank"] and c["rank"] <= 3)
+    expected = sum(c["chance_top3"] for c in scored)
+    var = sum(c["chance_top3"] * (1 - c["chance_top3"]) for c in scored)
+    z = (observed - expected) / var ** 0.5 if var > 0 else 0.0
+    return {"cases": cases, "total": len(cases), "scored": len(scored), "observed_top3": observed,
+            "expected_top3": round(expected, 1), "z": round(z, 2),
+            "note": "Only moves that block or boost another enzyme are ranked here, since restoring the lost enzyme "
+                    "is trivially right. 'Expected by chance' is what a random ranking would score on the same cases; "
+                    "the method is only adding something to the extent the observed count beats it. A match means "
+                    "the model favoured an enzyme that some real drug acts on, which is suggestive, not proof that "
+                    "it found that drug's clinical use."}
+
+
+def target_search(path, species, direction="lower", steps=4000, block=0.3, boost=3.0):
+    """Drug-target search for a model: which step, blocked or boosted, moves one quantity furthest the way you want?
+
+    Uses the average level over the whole run rather than the end point, so it works for transient responses such
+    as a vaccine or a single drug dose as well as for steady states.
+    """
+    sp = path["species"]
+    if species not in sp:
+        return None
+    i = sp.index(species)
+    ids = [r["id"] for r in path["reactions"]]
+
+    def avg(scale=None):
+        run = simulate_pathway(path, steps=steps, enzyme_scale=scale, record=True)
+        tr = np.array(run["trace"])
+        return float(tr[:, i].mean()), {s: float(tr[:, k].mean()) for k, s in enumerate(sp)}
+
+    base, base_all = avg()
+    rows = []
+    for j, r in enumerate(path["reactions"]):
+        for f, label in ((block, "Block"), (boost, "Boost")):
+            scale = [f if k == j else 1.0 for k in range(len(ids))]
+            val, allv = avg(scale)
+            change = (val - base) / max(abs(base), 1e-9)
+            good = -change if direction == "lower" else change
+            side = sorted(((s, (allv[s] - base_all[s]) / max(abs(base_all[s]), 1e-9)) for s in sp if s != species),
+                          key=lambda kv: -abs(kv[1]))[:3]
+            rows.append({"move": f"{label} {r['name']}", "reaction": r["id"], "factor": f, "level": round(val, 4),
+                         "change": round(change, 3), "benefit": round(good, 3),
+                         "side_effects": [{"species": s, "change": round(c, 3)} for s, c in side if abs(c) > 0.05],
+                         "known_drugs": [d["name"] for d in r.get("drugs", [])]})
+    rows.sort(key=lambda r: -r["benefit"])
+    return {"species": species, "direction": direction, "baseline": round(base, 4), "moves": rows}

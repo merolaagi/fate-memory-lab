@@ -21,7 +21,7 @@ LAYER_TYPES = {
                 "fields": [["units", "int", 2, 64], ["dt", "float", 0.05, 1], ["substeps", "int", 1, 10],
                            ["constraint", "choice", ["sign-consistent", "one-cycle-flipped", "contraction", "free"]],
                            ["self_excitation", "float", 0, 12], ["coupling", "float", 0, 3]]},
-    "pathway": {"title": "Metabolic pathway", "eq": "dc/dt = N v(c) + inflow",
+    "pathway": {"title": "Pathway or model", "eq": "dc/dt = N v(c) + inflow",
                 "fields": [["pathway", "choice", list(PATHWAYS)], ["dt", "float", 0.01, 0.2], ["substeps", "int", 1, 20],
                            ["inflow", "float", 0, 5]]},
     "readout": {"title": "Readout", "eq": "y = R h + c", "fields": [["outputs", "int", 1, 8], ["scale", "float", 0, 5]]},
@@ -89,6 +89,8 @@ def from_model(spec, task, name):
 
 
 def from_pathway(pid, name=None):
+    if pid not in PATHWAYS:
+        raise KeyError(pid)
     p = PATHWAYS[pid]
     pw = new_layer("pathway", pathway=pid)
     layers = [new_layer("input", channels=len(pw["params"]["inputs"])), pw, new_layer("linear", out=8),

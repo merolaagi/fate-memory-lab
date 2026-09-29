@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.5.0
+- Settings page: enter the Anthropic API key and model, and the Neo4j address, user, password and database, inside the app
+- Stored in data/settings.json with owner-only permissions, excluded from git, kept across updates; keys never returned to the browser in full
+- Test buttons confirm the Anthropic key and the Neo4j connection
+- Settings can only be changed from the Mac itself or through Cloudflare Access; the open internet sees them read-only
+- Values saved in the app take precedence over environment variables, which fixes the background service not passing them through
+
+## 1.4.0
+- Research tab: search Europe PMC (PubMed, PMC, bioRxiv, medRxiv), read a paper's math, build a model from it, and test whether it works
+- Reading by Claude when ANTHROPIC_API_KEY is set (structured recipe, stated parameters with source sentences, caveats, validated before use), or by a transparent keyword reader otherwise
+- Seven model families for drug and vaccine work: viral dynamics, vaccine antibody response, PK/PD, enzyme inhibition, gene switch, drug-resistant tumour, epidemic with vaccination
+- Feasibility test for every built model, including how many rate constants the paper actually supplied
+- Research models join Pathways (network, what-if, therapy search, Cypher) and open on the Models canvas
+- Drug-target search: block and boost every step to move a chosen quantity, with side effects
+- Kinetics engine gains mass-action and Hill rate laws, cooperative regulators and explicit initial states
+
+## 1.3.0
+- Strategy search now tries combinations of the best single moves and reports whether each pair helps or interferes
+- On the joined network, reports what the best drug-like move does to other pathways: the model's side effects
+- Large networks restrict the search to enzymes within two steps of the failure, keeping it to about a minute
+- Test the method: runs the strategy search on all 66 known deficiencies and compares the model's ranking with an exact random-ranking baseline and a z-score
+- Scoring re-weighted toward clearing the toxin (85%) over restoring output (15%), which took the benchmark from no better than chance (22 vs 21.3) to better than chance (33 vs 27.1, z = 2.26)
+
 ## 1.2.0
 - Eighteen more pathways, 26 in total: gluconeogenesis, glycogen, fructose, the polyol pathway, pyruvate, beta-oxidation, ketone bodies, propionate, branched-chain amino acids, catecholamines, methionine and homocysteine, folate, pyrimidines, haem, bilirubin, glutathione, sphingolipids, cholesterol and alcohol
 - Almost every enzyme step now carries its inherited deficiency and the drugs acting on it

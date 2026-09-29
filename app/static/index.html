@@ -54,6 +54,8 @@ h3.sub{font-family:var(--display);font-weight:500;font-size:1.1rem;margin:28px 0
 .fields label{display:grid;gap:3px;font-size:.85rem;color:var(--muted)}
 .fields input,.fields select{border:1px solid var(--rule);background:var(--agar);border-radius:6px;padding:5px 7px;color:var(--ink);font-size:.92rem}
 pre.code{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:14px;overflow:auto;max-height:420px;font-size:.78rem;line-height:1.45}
+#wsnew{min-width:0;flex:1 1 140px;max-width:100%}
+#modelpanel .modelhead{flex-wrap:nowrap}
 .pill{display:inline-block;border:1px solid var(--rule);border-radius:999px;padding:2px 10px;font-size:.8rem;margin:0 6px 6px 0}
 .report{background:var(--surface);border:1px solid var(--rule);border-radius:14px;padding:18px 22px;margin:0 0 8px;max-width:980px}
 .report h3{font-family:var(--display);font-weight:500;font-size:1.15rem;margin:14px 0 4px}
@@ -135,6 +137,7 @@ figure{margin:0}
     <button type="button" data-view="runs" aria-current="true">Runs</button>
     <button type="button" data-view="models">Models</button>
     <button type="button" data-view="pathways">Pathways</button>
+    <button type="button" data-view="research">Research</button>
   </nav>
   <div id="runpanel">
   <form id="form" novalidate>
@@ -183,11 +186,30 @@ figure{margin:0}
     <h3>Your models</h3>
     <ul class="runs" id="wslist"></ul>
   </div>
+  <div id="respanel" hidden>
+    <h3>Search current research</h3>
+    <form id="rsform" class="fields" style="grid-template-columns:1fr">
+      <label>Topic<input name="q" placeholder="e.g. HIV viral dynamics antiretroviral"></label>
+      <div class="grid2"><label class="f">Since<input name="since" type="number" min="1900" max="2100" placeholder="2020"></label>
+        <label class="f">Results<input name="n" type="number" min="1" max="40" value="15"></label></div>
+      <label class="chip"><input type="checkbox" name="preprints" checked><span>Include preprints</span></label>
+      <label class="chip"><input type="checkbox" name="oa"><span>Open access only</span></label>
+      <button class="btn" type="submit">Search</button>
+    </form>
+    <p class="note" id="rsstatus"></p>
+    <h3>Model library</h3>
+    <ul class="runs" id="rslib"></ul>
+    <h3>Your research models</h3>
+    <ul class="runs" id="rsmodels"></ul>
+  </div>
   <div id="pathpanel" hidden>
     <h3>Pathways</h3>
     <p class="note">Real metabolic pathways with textbook stoichiometry. The structure is analysed exactly; rate constants are illustrative.</p>
+    <button class="btn ghost" id="benchbtn" type="button">Test the method</button>
+    <p class="note" id="benchnote"></p>
     <ul class="runs" id="pwlist"></ul>
   </div>
+  <p class="note"><button class="btn ghost" id="setbtn" type="button">Settings</button></p>
   <p class="note" id="ver"></p>
 </aside>
 <main id="main">
@@ -606,11 +628,36 @@ function setView(v){
   VIEW=v;
   document.querySelectorAll("#nav button").forEach(b=>b.setAttribute("aria-current",String(b.dataset.view===v)));
   $("#runpanel").hidden=v!=="runs"; $("#modelpanel").hidden=v!=="models"; $("#pathpanel").hidden=v!=="pathways";
+  $("#respanel").hidden=v!=="research";
+  if(v==="research"){initResearch();$("#main").innerHTML=`<div class="empty"><h2>Research</h2><p>Search current cell and molecular biology on the left. Pick a paper, let the app read the math out of it, and test whether that math builds a working model you can then study in Pathways and edit on the Models canvas. Or start from a model family in the library.</p></div>`}
   if(v==="runs"){CURRENT?select(CURRENT):($("#main").innerHTML=`<div class="empty"><h2>No run selected</h2><p>Start a run on the left.</p></div>`)}
   if(v==="models"){listWorkspaces();$("#main").innerHTML=`<div class="empty"><h2>Models</h2><p>Open one of your models, or create a new one on the left: blank, from a metabolic pathway, or from the best circuit of the run you have open.</p></div>`}
   if(v==="pathways"){listPathways();$("#main").innerHTML=`<div class="empty"><h2>Pathways</h2><p>Pick a pathway to see its structure, what the theorems say about it, and how it behaves when an enzyme is knocked down.</p></div>`}
 }
 document.querySelectorAll("#nav button").forEach(b=>b.onclick=()=>setView(b.dataset.view));
+$("#benchbtn").onclick=async()=>{await api("/api/benchmark",{method:"POST"});pollBench(true)};
+async function pollBench(show){
+  const d=await api("/api/benchmark"), note=$("#benchnote");
+  if(d.status==="running"){note.textContent=`Testing every deficiency: ${Math.round(d.progress*100)}% (${d.where})`;setTimeout(()=>pollBench(show),2000)}
+  else if(d.status==="failed"){note.textContent="Failed: "+d.where}
+  else note.textContent=d.result&&d.result.observed_top3!==undefined?`Last test: ${d.result.observed_top3} of ${d.result.scored} in the top 3, against ${d.result.expected_top3} by chance.`:"";
+  if(d.result&&show) renderBench(d.result);
+}
+function renderBench(r){
+  const rows=r.cases.filter(c=>c.drug_moves).sort((a,b)=>(a.rank||99)-(b.rank||99));
+  const verdict=r.z>=2?"better than chance by a margin unlikely to be luck":r.z>=1?"somewhat better than chance, but not by a convincing margin":"no better than chance";
+  $("#main").innerHTML=`<div class="runhead"><div><h2>Testing the method against real drugs</h2>
+      <p class="note">Every enzyme with a known deficiency was knocked down to 5% and the strategy search run on it.</p></div></div>
+    <div class="report"><p>${r.total} deficiencies tested. In ${r.scored} of them, at least one other enzyme in the pathway is a real drug target.</p>
+      <p><b>The model put a real drug target in its top three in ${r.observed_top3} of ${r.scored} cases. A random ranking would manage ${r.expected_top3}.</b> That is ${verdict} (z = ${r.z}).</p>
+      <p class="note">${esc(r.note)}</p></div>
+    <h3 class="sub">Case by case</h3>
+    <div class="tablewrap"><table><thead><tr><th>Pathway</th><th>Enzyme lost</th><th>Condition</th><th>Toxin (fold)</th><th>First real-target move</th><th>Rank</th><th>Chance of top 3</th><th>Real drugs there</th></tr></thead><tbody>`+
+      rows.map(c=>`<tr><td>${esc(c.pathway)}</td><td>${esc(c.enzyme)}</td><td style="text-align:left;white-space:normal">${esc(c.deficiency||"")}</td><td>${esc(String(c.toxin||"—"))} ${c.fold?"("+c.fold+"x)":""}</td>
+        <td style="text-align:left;white-space:normal">${esc(c.matched_move||"")}</td><td>${c.rank??"—"} of ${c.moves}</td><td>${Math.round(c.chance_top3*100)}%</td><td style="text-align:left;white-space:normal">${esc(c.drugs.join(", "))}</td></tr>`).join("")+
+      `</tbody></table></div>`;
+}
+pollBench(false);
 
 async function listWorkspaces(){
   if(!WSMETA){WSMETA=await api("/api/workspaces/meta");
@@ -747,7 +794,7 @@ async function loadWsCode(id){const d=await api(`/api/workspaces/${id}/code`);co
 
 async function listPathways(){
   const ps=await api("/api/pathways");
-  $("#pwlist").innerHTML=ps.map(p=>`<li><button data-id="${p.id}" aria-current="${p.id===PWCUR}"><span class="nm">${esc(p.name)}</span><span class="sub">${p.species} species, ${p.reactions} reactions</span></button></li>`).join("");
+  $("#pwlist").innerHTML=ps.map(p=>`<li><button data-id="${p.id}" aria-current="${p.id===PWCUR}"><span class="nm">${esc(p.name)}</span><span class="sub">${p.research?"from research, ":""}${p.species} species, ${p.reactions} reactions</span></button></li>`).join("");
   document.querySelectorAll("#pwlist button").forEach(b=>b.onclick=()=>openPathway(b.dataset.id));
 }
 async function openPathway(pid){
@@ -801,7 +848,7 @@ async function neoStatus(pid){
   const el=$("#pwneo"), btn=$("#pwpush"); if(!el) return;
   try{const st=await api("/api/neo4j/status");
     el.textContent=!st.driver_installed?"Neo4j driver not installed: run .venv/bin/pip install neo4j":
-      !st.configured?"Set NEO4J_URI and NEO4J_PASSWORD to push straight into your database.":`Ready: ${st.uri}, database ${st.database}.`;
+      !st.configured?"Add your Neo4j address and password in Settings to push straight into your database.":`Ready: ${st.uri}, database ${st.database}.`;
     btn.disabled=!(st.driver_installed&&st.configured);
   }catch(e){el.textContent=""}
   const qb=$("#pwquery"), box=$("#pwquerybox");
@@ -891,7 +938,12 @@ async function runStrategies(node){
   h+=`<div class="tablewrap"><table><thead><tr><th>Move</th><th>Score</th><th>${esc(d.toxin||"toxin")} after</th><th>Output after</th><th>Matches a real drug</th></tr></thead><tbody>`+
     d.strategies.map(s=>`<tr><td style="text-align:left;white-space:normal"><b>${esc(s.move)}</b><br><span class="note">${esc(s.mechanism)}</span></td>
       <td>${s.score}</td><td>${s.toxin_after}</td><td>${s.flux_after}</td><td style="text-align:left;white-space:normal">${s.known_drugs.length?esc([...new Set(s.known_drugs)].join(", ")):"—"}</td></tr>`).join("")+
-    `</tbody></table></div><p class="note">These are moves inside a model with illustrative rate constants, not treatment advice. Their value is in showing which kind of approach the network structure favours, and where the model agrees with treatments that already exist.</p>`;
+    `</tbody></table></div>`+
+    (d.combinations&&d.combinations.length?`<h4 style="margin:14px 0 4px">Combinations of the best single moves</h4><div class="tablewrap"><table><thead><tr><th>Combination</th><th>Score</th><th>Best single alone</th><th>${esc(d.toxin||"toxin")} after</th></tr></thead><tbody>`+
+      d.combinations.map(c=>`<tr><td style="text-align:left;white-space:normal">${esc(c.move)}</td><td>${c.score}</td><td>${c.best_single}</td><td>${c.toxin_after}</td></tr>`).join("")+
+      `</tbody></table></div><p class="note">A combination scoring above its best single move means the two work together; scoring below means they interfere.</p>`:"")+
+    (d.off_target&&d.off_target.pathways&&Object.keys(d.off_target.pathways).length?`<h4 style="margin:14px 0 4px">What the best drug-like move does elsewhere</h4><p>${esc(d.off_target.move)} also moves: ${Object.entries(d.off_target.pathways).map(([k,v])=>`<b>${esc(k)}</b> (${v.map(esc).join(", ")})`).join("; ")}. These are the model's version of side effects.</p>`:"")+
+    `<p class="note">These are moves inside a model with illustrative rate constants, not treatment advice. Their value is in showing which kind of approach the network structure favours, and where the model agrees with treatments that already exist.</p>`;
   out.innerHTML=h;
 }
 async function runDeeper(pid){
@@ -924,6 +976,145 @@ async function runPathway(pid,kd){
     <p class="note">Fluxes at the end: ${Object.entries(d.flux).map(([k,v])=>`${esc(k)} ${v}`).join(", ")}.</p>`;
 }
 
+let RS={init:false,results:[],paper:null,reading:null};
+async function initResearch(){
+  const st=await api("/api/research/status");
+  $("#rsstatus").innerHTML=st.claude?`Papers are read by Claude (${esc(st.model)}).`:`Papers are read by keyword. <a href="#" id="rsset">Add an Anthropic key in Settings</a> to have Claude read the actual mechanism and numbers.`;
+  const rl=$("#rsset"); if(rl) rl.onclick=e=>{e.preventDefault();openSettings()};
+  const lib=await api("/api/research/templates");
+  $("#rslib").innerHTML=lib.map(t=>`<li><button data-t="${t.id}"><span class="nm">${esc(t.name)}</span><span class="sub">${esc(t.family)}, ${t.species.length} species</span></button></li>`).join("");
+  document.querySelectorAll("#rslib button").forEach(b=>b.onclick=()=>showTemplate(lib.find(t=>t.id===b.dataset.t)));
+  listResearchModels();
+  if(!RS.init){RS.init=true;$("#rsform").onsubmit=searchResearch}
+}
+async function listResearchModels(){
+  const ms=await api("/api/research/models");
+  $("#rsmodels").innerHTML=ms.length?ms.map(m=>`<li><button data-id="${m.id}"><span class="nm">${esc(m.name)}</span><span class="sub">${esc(m.family||"custom")}: ${esc(m.verdict||"")}</span></button></li>`).join(""):`<li class="note">Models you build from papers appear here.</li>`;
+  document.querySelectorAll("#rsmodels button").forEach(b=>b.onclick=async()=>showModel(await api("/api/research/models/"+b.dataset.id)));
+}
+async function searchResearch(e){
+  e.preventDefault();
+  const f=new FormData(e.target),q=new URLSearchParams({q:f.get("q")||"",n:f.get("n")||15,preprints:f.get("preprints")?"true":"false",oa:f.get("oa")?"true":"false"});
+  if(f.get("since")) q.set("since",f.get("since"));
+  $("#main").innerHTML=`<p class="note">Searching Europe PMC…</p>`;
+  try{RS.results=await api("/api/research/search?"+q)}catch(err){$("#main").innerHTML=`<div class="err">${esc(err.message)}</div>`;return}
+  $("#main").innerHTML=`<div class="runhead"><div><h2>${RS.results.length} papers</h2><p class="note">Newest first, from PubMed, PMC and preprint servers. Pick one to read its math.</p></div></div>`+
+    RS.results.map((p,i)=>`<div class="report" style="margin-bottom:10px"><h3 style="margin:0 0 4px">${esc(p.title)}</h3>
+      <p class="note">${esc(p.authors||"")}${p.journal?", "+esc(p.journal):""}${p.year?", "+esc(p.year):""}${p.preprint?", preprint (not peer reviewed)":""}</p>
+      <p>${esc((p.abstract||"No abstract available.").slice(0,380))}${(p.abstract||"").length>380?"…":""}</p>
+      <div class="actions"><button class="btn ghost" data-i="${i}">Read the math</button>${p.link?`<a href="${esc(p.link)}" target="_blank" rel="noopener">Open paper</a>`:""}</div></div>`).join("");
+  document.querySelectorAll("#main [data-i]").forEach(b=>b.onclick=()=>openPaper(RS.results[+b.dataset.i]));
+}
+function openPaper(p){
+  RS.paper=p;
+  $("#main").innerHTML=`<div class="runhead"><div><h2>${esc(p.title)}</h2><p class="note">${esc(p.authors||"")}${p.year?", "+esc(p.year):""}${p.preprint?", preprint":""}</p></div>
+      <div class="actions">${p.link?`<a href="${esc(p.link)}" target="_blank" rel="noopener">Open paper</a>`:""}</div></div>
+    <div class="report"><p>${esc(p.abstract||"No abstract available.")}</p></div>
+    <h3 class="sub">Add the methods section (optional)</h3>
+    <p class="note">Abstracts rarely contain the equations. Pasting the paper's methods or model section lets the reader see the actual mechanism and parameter values.</p>
+    <textarea id="rstext" rows="6" style="width:100%;border:1px solid var(--rule);border-radius:8px;background:var(--surface);color:var(--ink);padding:10px;font:inherit"></textarea>
+    <div class="modelhead" style="margin-top:8px"><button class="btn" id="rsread">Read the math</button></div>
+    <div id="rsreading"></div>`;
+  $("#rsread").onclick=readPaper;
+}
+async function readPaper(){
+  const box=$("#rsreading"); box.innerHTML=`<p class="note">Reading…</p>`;
+  let d;try{d=await api("/api/research/read",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({paper:RS.paper,text:$("#rstext").value||""})})}catch(e){box.innerHTML=`<div class="err">${esc(e.message)}</div>`;return}
+  RS.reading=d;
+  let h=`<h3 class="sub">What the math looks like</h3><div class="report">`;
+  if(d.reader==="claude"){
+    h+=`<p><b>Read by Claude</b> (${esc(d.confidence)} confidence). ${esc(d.summary||"")}</p>`;
+    h+=d.family?`<p>Model family: <b>${esc(d.family)}</b>.</p>`:`<p>No model family fitted.</p>`;
+    if(d.stated_parameters.length) h+=`<p><b>Numbers the paper states:</b></p><ul>${d.stated_parameters.map(x=>`<li>${esc(x.name)} = ${x.value} ${esc(x.unit)}: <span class="note">"${esc(x.sentence)}"</span></li>`).join("")}</ul>`;
+    if(d.caveats.length) h+=`<p class="note">Caveats: ${d.caveats.map(esc).join(" ")}</p>`;
+  } else {
+    h+=d.matches&&d.matches.length?`<p><b>Read by keyword.</b> The paper points to: ${d.matches.map(m=>`<b>${esc(m.name)}</b> (${m.hits.map(esc).join(", ")})`).join("; ")}.</p>`:`<p>No model family recognised in this text.</p>`;
+    if(d.stated_numbers&&d.stated_numbers.length) h+=`<p><b>Sentences with numbers you may want to set by hand:</b></p><ul>${d.stated_numbers.map(x=>`<li class="note">${esc(x)}</li>`).join("")}</ul>`;
+    h+=`<p class="note">${esc(d.caveat)}</p>`;
+  }
+  h+=`</div>`;
+  if(d.recipe) h+=`<div class="modelhead"><button class="btn" id="rsbuild">Build and test the model</button></div>`;
+  box.innerHTML=h;
+  const b=$("#rsbuild"); if(b) b.onclick=async()=>{b.disabled=true;b.textContent="Building…";
+    try{showModel(await api("/api/research/models",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({paper:RS.paper,reading:RS.reading,recipe:RS.reading.recipe})}));listResearchModels()}
+    catch(e){box.insertAdjacentHTML("beforeend",`<div class="err">${esc(e.message)}</div>`);b.disabled=false}};
+}
+function showTemplate(t){
+  $("#main").innerHTML=`<div class="runhead"><div><h2>${esc(t.name)}</h2><p class="note">${esc(t.family)}. ${esc(t.reference)}</p></div></div>
+    <div class="report"><p>${esc(t.description)}</p></div>
+    <div class="tablewrap"><table><thead><tr><th>Step</th><th>Rate law</th><th>Default rate</th></tr></thead><tbody>${t.reactions.map(r=>`<tr><td style="text-align:left">${esc(r.name)}</td><td>${esc(r.law)}</td><td>${r.rate}</td></tr>`).join("")}</tbody></table></div>
+    <div class="modelhead" style="margin-top:12px"><button class="btn" id="tplbuild">Build and test</button></div>`;
+  $("#tplbuild").onclick=async()=>{showModel(await api("/api/research/models/template",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({template:t.id})}));listResearchModels()};
+}
+function showModel(m){
+  const f=m.feasibility;
+  let h=`<div class="runhead"><div><h2>${esc(m.name)}</h2><p class="note">${esc(m.family||"custom")} model${m.paper&&m.paper.link?`, from <a href="${esc(m.paper.link)}" target="_blank" rel="noopener">the paper</a>`:""}.</p></div>
+      <div class="actions"><button class="btn ghost" id="rsdel">Delete</button></div></div>
+    <div class="report"><h3 style="margin-top:0">${esc(f.verdict)}</h3>
+      <ul>${f.checks.map(c=>`<li>${c.ok?"✓":"✗"} ${esc(c.check)}${c.detail?` <span class="note">${esc(c.detail)}</span>`:""}</li>`).join("")}</ul>
+      ${f.notes.map(n=>`<p class="note">${esc(n)}</p>`).join("")}</div>
+    <figure class="chart rschart"></figure>
+    <div class="modelhead"><button class="btn" id="rsopen">Study it in Pathways</button><button class="btn ghost" id="rscanvas">Open on the Models canvas</button></div>
+    <p class="note">In Pathways the model gets the network view, what-if on every step, the therapy search and Cypher export. On the canvas it becomes a layer you can wire into a larger model and export as code.</p>
+    <h3 class="sub">Find drug targets</h3>
+    <p class="note">Choose the quantity you want to move. Every step is blocked to 30% and boosted to 300% in turn, and ranked by how far it moves that quantity, averaged over the whole run. Side effects are the other quantities that move most.</p>
+    <div class="modelhead"><select id="tgsp">${f.species.map(x=>`<option>${esc(x)}</option>`).join("")}</select>
+      <select id="tgdir"><option value="lower">lower it</option><option value="raise">raise it</option></select>
+      <button class="btn ghost" id="tgrun">Rank the steps</button></div><div id="tgout"></div>
+    <h3 class="sub">Steps in the model</h3>
+    <div class="tablewrap"><table><thead><tr><th>Step</th><th>Reaction</th><th>Law</th><th>Rate</th><th>Evidence</th></tr></thead><tbody>
+    ${m.reactions.map(r=>`<tr><td style="text-align:left">${esc(r.name)}</td><td style="text-align:left">${esc(Object.entries(r.substrates).map(([k,v])=>v>1?v+" "+k:k).join(" + ")||"∅")} → ${esc(Object.entries(r.products).map(([k,v])=>v>1?v+" "+k:k).join(" + ")||"∅")}</td><td>${esc(r.law)}</td><td>${r.rate}</td><td style="text-align:left;white-space:normal" class="note">${esc(r.evidence||"")}</td></tr>`).join("")}</tbody></table></div>`;
+  $("#main").innerHTML=h;
+  const tr=f.trace,S=f.species;
+  if(tr&&tr.length){const mx=Math.max(...tr.flat(),1e-9),w=900,hh=280,p=46,X=t=>p+(w-10-p)*t/(tr.length-1),Y=v=>hh-40-(hh-70)*v/mx;
+    let g=axes(w,hh,p,tr.length,0,mx,"time",v=>v.toFixed(2)),lg="";
+    S.forEach((s,i)=>{g+=`<polyline fill="none" stroke="${wellColor(i)}" stroke-width="1.8" points="${tr.map((r,t)=>X(t).toFixed(1)+","+Y(r[i]).toFixed(1)).join(" ")}"/>`;lg+=`<span><i class="dot" style="background:${wellColor(i)}"></i> ${esc(s)}</span>`});
+    document.querySelector(".rschart").innerHTML=`<svg viewBox="0 0 ${w} ${hh}" role="img" aria-label="Model time course">${g}</svg><div class="legend">${lg}</div>`}
+  $("#tgrun").onclick=async()=>{const out=$("#tgout");out.innerHTML=`<p class="note">Trying every step…</p>`;
+    try{const d=await api(`/api/pathways/${m.pid}/targets?species=${encodeURIComponent($("#tgsp").value)}&direction=${$("#tgdir").value}`);
+      out.innerHTML=`<p>Average ${esc(d.species)} with nothing changed: ${d.baseline}.</p><div class="tablewrap"><table><thead><tr><th>Move</th><th>${esc(d.species)} after</th><th>Change</th><th>Side effects</th><th>Real interventions here</th></tr></thead><tbody>`+
+        d.moves.slice(0,10).map(x=>`<tr><td style="text-align:left;white-space:normal">${esc(x.move)}</td><td>${x.level}</td><td>${x.change>0?"+":""}${Math.round(x.change*100)}%</td>
+          <td style="text-align:left;white-space:normal">${x.side_effects.map(se=>`${esc(se.species)} ${se.change>0?"+":""}${Math.round(se.change*100)}%`).join(", ")||"—"}</td>
+          <td style="text-align:left;white-space:normal">${esc(x.known_drugs.join(", "))||"—"}</td></tr>`).join("")+`</tbody></table></div>`;
+    }catch(e){out.innerHTML=`<div class="err">${esc(e.message)}</div>`}};
+  $("#rsopen").onclick=()=>{setView("pathways");setTimeout(()=>openPathway(m.pid),300)};
+  $("#rscanvas").onclick=async()=>{WSMETA=null;await listWorkspaces();const w=await api("/api/workspaces",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pathway:m.pid})});setView("models");setTimeout(()=>openWorkspace(w.id),300)};
+  $("#rsdel").onclick=async()=>{if(!confirm("Delete this research model?"))return;await api("/api/research/models/"+m.id,{method:"DELETE"});listResearchModels();$("#main").innerHTML=`<div class="empty"><h2>Deleted</h2></div>`};
+}
+const SRC={app:"saved in the app",environment:"from the server environment",default:"not set"};
+$("#setbtn").onclick=openSettings;
+async function openSettings(){
+  document.querySelectorAll("#nav button").forEach(b=>b.setAttribute("aria-current","false"));
+  const d=await api("/api/settings"), ro=!d.can_edit;
+  const field=(name,label,type="text",ph="")=>`<label>${label}<input data-k="${name}" type="${type}" autocomplete="off" spellcheck="false" placeholder="${esc(d[name].secret&&d[name].set?d[name].value:ph)}" value="${d[name].secret?"":esc(d[name].value||"")}" ${ro?"disabled":""}></label>`;
+  $("#main").innerHTML=`<div class="runhead"><div><h2>Settings</h2><p class="note">Stored on this server in data/settings.json, readable only by your user account, and never pushed to GitHub. Keys are never sent back to the browser in full. A value saved here takes precedence over the matching environment variable.</p></div></div>
+    ${ro?`<div class="err">You are viewing this through the public address without Cloudflare Access, so settings are read-only here. Change them from the Mac itself at http://127.0.0.1:47431, or put an Access policy on fml.fueldeskpro.com.</div>`:""}
+    <div class="report" style="margin-top:14px"><h3 style="margin-top:0">Anthropic</h3>
+      <p class="note">Used by the Research tab to read the math out of papers. Current key: ${d.anthropic_api_key.set?`<b>${esc(d.anthropic_api_key.value)}</b>, ${SRC[d.anthropic_api_key.source]}`:"none"}.</p>
+      <div class="fields">${field("anthropic_api_key","API key","password","sk-ant-…")}
+        <label>Model<select data-k="anthropic_model" ${ro?"disabled":""}>${d.models.map(m=>`<option ${m===d.anthropic_model.value?"selected":""}>${esc(m)}</option>`).join("")}</select></label></div>
+      <div class="actions"><button class="btn" data-save="anthropic" ${ro?"disabled":""}>Save</button><button class="btn ghost" id="testant" ${ro?"disabled":""}>Test the key</button>
+        <button class="btn ghost" data-clear="anthropic_api_key" ${ro?"disabled":""}>Remove the key</button><span class="note" id="antnote"></span></div></div>
+    <div class="report" style="margin-top:14px"><h3 style="margin-top:0">Neo4j</h3>
+      <p class="note">Used by Push to Neo4j and Query Neo4j on the Pathways tab. Password: ${d.neo4j_password.set?`set, ${SRC[d.neo4j_password.source]}`:"not set"}.</p>
+      <div class="fields">${field("neo4j_uri","Address","text","neo4j+s://xxxx.databases.neo4j.io")}${field("neo4j_user","User")}
+        ${field("neo4j_password","Password","password")}${field("neo4j_database","Database")}</div>
+      <div class="actions"><button class="btn" data-save="neo4j" ${ro?"disabled":""}>Save</button><button class="btn ghost" id="testneo" ${ro?"disabled":""}>Test the connection</button>
+        <button class="btn ghost" data-clear="neo4j_password" ${ro?"disabled":""}>Remove the password</button><span class="note" id="neonote"></span></div></div>`;
+  const groups={anthropic:["anthropic_api_key","anthropic_model"],neo4j:["neo4j_uri","neo4j_user","neo4j_password","neo4j_database"]};
+  document.querySelectorAll("[data-save]").forEach(b=>b.onclick=async()=>{
+    const values={};for(const k of groups[b.dataset.save]){const el=document.querySelector(`[data-k="${k}"]`);values[k]=el.value}
+    const note=b.dataset.save==="anthropic"?$("#antnote"):$("#neonote");
+    try{await api("/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({values})});note.textContent="Saved.";setTimeout(openSettings,700)}
+    catch(e){note.textContent=e.message}});
+  document.querySelectorAll("[data-clear]").forEach(b=>b.onclick=async()=>{
+    if(!confirm("Remove it from the app? The server environment value, if any, will be used instead."))return;
+    await api("/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({clear:[b.dataset.clear]})});openSettings()});
+  const t1=$("#testant"); if(t1) t1.onclick=async()=>{$("#antnote").textContent="Testing…";
+    try{const r=await api("/api/settings/test/anthropic",{method:"POST"});$("#antnote").textContent=`The key works with ${r.model}.`}catch(e){$("#antnote").textContent=e.message}};
+  const t2=$("#testneo"); if(t2) t2.onclick=async()=>{$("#neonote").textContent="Testing…";
+    try{const r=await api("/api/settings/test/neo4j",{method:"POST"});$("#neonote").textContent=`Connected to ${r.uri}.`}catch(e){$("#neonote").textContent=e.message}};
+}
 init().catch(e=>{$("#main").innerHTML=`<div class="empty"><h2>Server not reachable</h2><p>${esc(e.message)}. Check that the service is running, then reload.</p></div>`});
 </script>
 </body>
