@@ -233,31 +233,38 @@ ALDH2 fails. Others are coincidences, which is why the chance baseline is there.
 ## Neo4j
 
 Any pathway exports as Cypher with no setup: use **Download Cypher** and paste the file into Neo4j Browser or run it
-with cypher-shell. To push directly from the app, install the driver and point it at your database:
+with cypher-shell. To push and query from inside the app you need a running Neo4j database. The driver is installed
+with the app.
+
+The simplest database is a local one on the same Mac. Choose a password of **letters and numbers only**: characters
+like `!` and `$` are rewritten by the shell unless quoted, and Neo4j then stores something other than what you typed.
+Set the password **before the first start**, because `set-initial-password` has no effect afterwards:
 
 ```bash
-cd ~/Sites/fate-memory-lab
-.venv/bin/pip install neo4j
+brew install neo4j
+neo4j-admin dbms set-initial-password 'YourPasswordHere123'
+brew services start neo4j
 ```
 
-Then set these before starting the service:
+Check it with `cypher-shell -a bolt://localhost:7687 -u neo4j -p 'YourPasswordHere123' "RETURN 'ok';"`, then enter
+`bolt://localhost:7687`, user `neo4j`, the password and database `neo4j` in **Settings**, and press **Test the
+connection**. Neo4j Aura Free in the cloud works as well; it shows its address and a generated password once, when
+the instance is created.
 
-| Variable | Meaning |
-|---|---|
-| `NEO4J_URI` | `neo4j+s://xxxx.databases.neo4j.io` for Aura, or `bolt://localhost:7687` locally |
-| `NEO4J_USER` | Defaults to `neo4j` |
-| `NEO4J_PASSWORD` | Your database password |
-| `NEO4J_DATABASE` | Defaults to `neo4j` |
+If the password was set wrongly and the database is still empty, the reliable reset is to stop Neo4j, delete its data
+folder (Homebrew keeps it at `/opt/homebrew/var/neo4j/data`), set the initial password again, and start it. Editing
+`neo4j.conf` to switch authentication off is fragile and best avoided.
 
-The Push to Neo4j button then loads the open pathway, and the app says which piece is missing if it cannot. Once
-loaded, questions like "which conditions come from enzymes that handle this metabolite" or "which drugs act two steps
-upstream of uric acid" become single Cypher queries across all eight pathways at once.
+On the Pathways tab, **Push all pathways** loads every pathway as its own graph, which is what the cross-pathway
+queries need. Pushing **Whole metabolism** instead loads the joined network as a single pathway, so nothing in it
+counts as shared between pathways.
 
 ## Querying the graph
 
 With the driver installed and the database configured, **Query Neo4j** opens a read-only Cypher panel with starting
 queries built in: conditions and the enzymes that cause them, drugs and what they act on, metabolites shared by more
-than one pathway, everything within two steps of uric acid, and every step with a known deficiency. Writes are
+than one pathway, everything within two steps of uric acid, every step with a known deficiency, conditions linked to
+each other through a shared metabolite, and drugs one shared metabolite away from a condition. Writes are
 rejected in this panel; use Push to Neo4j to load data.
 
 Because every metabolite also links to a shared `Compound` node, queries cross pathway boundaries. That is the point

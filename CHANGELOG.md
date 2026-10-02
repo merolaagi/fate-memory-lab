@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.1
+- The Neo4j driver now installs with the app instead of only with the developer tools
+- Push all pathways button, loading every pathway as its own graph for cross-pathway queries
+- Two new built-in queries: conditions linked through a shared metabolite, and drugs one shared metabolite away from a condition
+- Clearer message when a query returns no rows
+- README: Neo4j setup corrected, with the password quoted and set before the first start, and a reliable reset
+
 ## 1.5.0
 - Settings page: enter the Anthropic API key and model, and the Neo4j address, user, password and database, inside the app
 - Stored in data/settings.json with owner-only permissions, excluded from git, kept across updates; keys never returned to the browser in full

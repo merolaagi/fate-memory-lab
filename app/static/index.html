@@ -818,6 +818,7 @@ async function openPathway(pid){
     <p class="note">Circles are metabolites, squares are enzyme steps. Drag to rearrange; click any node to see what happens if it changes: an enzyme losing activity, or a metabolite held high or low. Known inherited deficiencies and the drugs that act on each step are marked.</p>
     <div class="modelhead"><a class="btn ghost" href="/api/pathways/${pid}/cypher?download=true">Download Cypher</a>
       <button class="btn ghost" id="pwpush">Push to Neo4j</button>
+      <button class="btn ghost" id="pwpushall">Push all pathways</button>
       <button class="btn ghost" id="pwquery">Query Neo4j</button><span class="note" id="pwneo"></span></div>
     <div id="pwquerybox" hidden>
       <div class="fields"><label style="grid-column:1/-1">Cypher (read-only)<textarea id="cyq" rows="3" style="width:100%;border:1px solid var(--rule);border-radius:6px;background:var(--agar);color:var(--ink);padding:8px;font-family:ui-monospace,Menlo,monospace;font-size:.85rem"></textarea></label></div>
@@ -842,6 +843,8 @@ const CYPHER_PRESETS=[
   ["Drugs and what they act on","MATCH (d:Drug)-[a:ACTS_ON]->(r:Reaction) RETURN d.name AS drug, a.effect AS effect, r.enzyme AS enzyme, r.pathway AS pathway"],
   ["Metabolites shared by more than one pathway","MATCH (m:Metabolite)-[:IS]->(c:Compound) WITH c, collect(DISTINCT m.pathway) AS paths WHERE size(paths) > 1 RETURN c.name AS compound, paths ORDER BY size(paths) DESC"],
   ["Everything two steps from uric acid","MATCH (c:Compound {name:'Urate'})<-[:IS]-(m:Metabolite)-[*1..2]-(n) RETURN DISTINCT labels(n)[0] AS kind, coalesce(n.name, n.enzyme) AS name LIMIT 40"],
+  ["Conditions linked through a shared metabolite","MATCH (c1:Condition)-[:CAUSED_BY_LOSS_OF]->(:Enzyme)-[:CATALYSES]->(:Reaction)-[:PRODUCES|SUBSTRATE_OF]-(m1:Metabolite)-[:IS]->(c:Compound)<-[:IS]-(m2:Metabolite)-[:PRODUCES|SUBSTRATE_OF]-(:Reaction)<-[:CATALYSES]-(:Enzyme)<-[:CAUSED_BY_LOSS_OF]-(c2:Condition) WHERE m1.pathway <> m2.pathway AND elementId(c1) < elementId(c2) RETURN DISTINCT c1.name AS condition, c.name AS shared_metabolite, c2.name AS linked_condition LIMIT 50"],
+  ["Drugs one shared metabolite away from a condition","MATCH (cond:Condition)-[:CAUSED_BY_LOSS_OF]->(:Enzyme)-[:CATALYSES]->(:Reaction)-[:PRODUCES|SUBSTRATE_OF]-(:Metabolite)-[:IS]->(c:Compound)<-[:IS]-(:Metabolite)-[:PRODUCES|SUBSTRATE_OF]-(r:Reaction)<-[:ACTS_ON]-(d:Drug) RETURN DISTINCT cond.name AS condition, c.name AS via, d.name AS drug, r.enzyme AS acts_on, r.pathway AS pathway LIMIT 50"],
   ["Enzyme steps with a known deficiency","MATCH (r:Reaction) WHERE r.deficiency IS NOT NULL RETURN r.pathway AS pathway, r.enzyme AS enzyme, r.deficiency AS deficiency"]
 ];
 async function neoStatus(pid){
@@ -859,9 +862,15 @@ async function neoStatus(pid){
   $("#cyrun").onclick=async()=>{
     const out=$("#cyout"); out.innerHTML=`<p class="note">Running…</p>`;
     try{const r=await api("/api/neo4j/query",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({cypher:$("#cyq").value})});
-      out.innerHTML=r.rows.length?`<div class="tablewrap"><table><thead><tr>${r.columns.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${r.rows.map(row=>`<tr>${r.columns.map(c=>`<td style="text-align:left;white-space:normal">${esc(row[c])}</td>`).join("")}</tr>`).join("")}</tbody></table></div><p class="note">${r.count} row${r.count===1?"":"s"}.</p>`:`<p class="note">No rows. Have you pushed the pathways yet?</p>`;
+      out.innerHTML=r.rows.length?`<div class="tablewrap"><table><thead><tr>${r.columns.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${r.rows.map(row=>`<tr>${r.columns.map(c=>`<td style="text-align:left;white-space:normal">${esc(row[c])}</td>`).join("")}</tr>`).join("")}</tbody></table></div><p class="note">${r.count} row${r.count===1?"":"s"}.</p>`:`<p class="note">No rows. The query is valid but found nothing in the pathways loaded so far. If you have only pushed one pathway, press Push all pathways and run it again.</p>`;
     }catch(e){out.innerHTML=`<p class="err">${esc(e.message)}</p>`}
   };
+  const all=$("#pwpushall"); if(all){all.disabled=btn.disabled;all.onclick=async()=>{all.disabled=true;el.textContent="Pushing every pathway…";
+    try{const r=await api("/api/neo4j/push",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})});
+      const n=Object.keys(r.pushed).length,st=Object.values(r.pushed).reduce((a,b)=>a+b,0);
+      el.textContent=`Loaded ${n} pathways (${st} statements) into ${r.uri}.`;
+    }catch(e){el.textContent="Push failed: "+e.message}
+    all.disabled=false}}
   btn.onclick=async()=>{btn.disabled=true;el.textContent="Pushing…";
     try{const r=await api("/api/neo4j/push",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pathway:pid})});
       el.textContent=`Loaded ${Object.entries(r.pushed).map(([k,v])=>`${k} (${v} statements)`).join(", ")} into ${r.uri}.`;
